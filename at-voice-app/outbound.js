@@ -22,7 +22,7 @@ module.exports = function (app) {
         return phone;
     }
 
-    // 🔒 Validate Kenyan numbers (practical ranges)
+    // 🔒 Validate Kenyan numbers
     function isValid(phone) {
         return /^254(7\d{8}|11\d{7})$/.test(phone);
     }
@@ -34,20 +34,20 @@ module.exports = function (app) {
             return res.status(400).send('Missing phone number');
         }
 
-        // 🔧 Normalize
+        // Normalize
         phone = normalize(phone);
 
         if (!phone) {
             return res.status(400).send('Invalid phone input');
         }
 
-        // 🔒 Validate
+        // Validate
         if (!isValid(phone)) {
             console.log('❌ Invalid format:', phone);
             return res.status(400).send('Invalid or unsupported phone number');
         }
 
-        // 🔴 Config check
+        // Check config
         if (!AT_NUMBER) {
             console.error('❌ AT_VOICE_NUMBER not set');
             return res.status(500).send('Server misconfigured');
@@ -57,10 +57,8 @@ module.exports = function (app) {
             console.log('📞 Calling:', phone);
 
             const payload = {
-                callFrom: AT_NUMBER,   // must be +254...
-                callTo:  [
-                    { phoneNumber: phone }
-    ]        // must be 254...
+                callFrom: AT_NUMBER,   // +254...
+                callTo: [phone]        // ✅ CORRECT FORMAT
             };
 
             console.log('📦 Payload:', payload);
