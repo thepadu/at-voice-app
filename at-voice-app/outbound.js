@@ -1,22 +1,37 @@
-app.all('/call', async (req, res) => {
-    console.log("🔥 /call route hit");
+const AfricasTalking = require('africastalking');
 
-    try {
-        const payload = {
-            callFrom: AT_NUMBER,
-            callTo: ['+254717134114'] // ✅ FIXED FORMAT
-        };
+module.exports = function (app) {
 
-        console.log("📦 Payload:", payload);
+    const africastalking = AfricasTalking({
+        apiKey: process.env.AT_API_KEY,
+        username: process.env.AT_USERNAME
+    });
 
-        const response = await voice.call(payload);
+    const voice = africastalking.VOICE;
+    const AT_NUMBER = process.env.AT_VOICE_NUMBER;
 
-        console.log("✅ Call response:", response);
+    // 📞 BASIC CALL TEST
+    app.all('/call', async (req, res) => {
+        console.log("🔥 /call route hit");
 
-        res.send('Call initiated');
+        try {
+            const payload = {
+                callFrom: AT_NUMBER,
+                callTo: ['+254717134114'] // ✅ IMPORTANT: include +
+            };
 
-    } catch (error) {
-        console.error("❌ ERROR:", error);
-        res.send('Call failed');
-    }
-});
+            console.log("📦 Payload:", payload);
+
+            const response = await voice.call(payload);
+
+            console.log("✅ Call response:", response);
+
+            res.send('Call initiated');
+
+        } catch (error) {
+            console.error("❌ ERROR:", error);
+            res.status(500).send('Call failed');
+        }
+    });
+
+};
