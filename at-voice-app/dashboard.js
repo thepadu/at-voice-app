@@ -33,22 +33,19 @@ module.exports = function(app, supabase) {
 
             rows += `
             <tr>
-                <td>${row.caller}</td>
-                <td>
-                    <span class="badge" style="background:${option.color}">
-                        ${option.label}
-                    </span>
-                </td>
-                <td>${new Date(row.created_at).toLocaleString()}</td>
-            </tr>
-            
-         
-            <tr>
                 <td>
                     ${row.caller}
                     <form method="POST" action="/call" style="display:inline;">
                         <input type="hidden" name="phone" value="${row.caller}">
-                        <button style="margin-left:8px;">📞</button>
+                        <button style="
+                            margin-left:8px;
+                            background:#0F9D58;
+                            color:white;
+                            border:none;
+                            padding:5px 10px;
+                            border-radius:6px;
+                            cursor:pointer;
+                        ">📞</button>
                     </form>
                 </td>
                 <td>
@@ -58,7 +55,8 @@ module.exports = function(app, supabase) {
                 </td>
                 <td>${new Date(row.created_at).toLocaleString()}</td>
             </tr>
-           `;
+            `;
+        });
 
         const html = `
         <html>
@@ -85,11 +83,6 @@ module.exports = function(app, supabase) {
                     align-items: center;
                 }
 
-                .header h1 {
-                    margin: 0;
-                    font-size: 20px;
-                }
-
                 .export-btn {
                     background: white;
                     color: #0F9D58;
@@ -97,11 +90,6 @@ module.exports = function(app, supabase) {
                     border-radius: 6px;
                     text-decoration: none;
                     font-weight: bold;
-                    font-size: 14px;
-                }
-
-                .export-btn:hover {
-                    background: #ECFDF5;
                 }
 
                 .container {
@@ -123,15 +111,8 @@ module.exports = function(app, supabase) {
                     border-left: 5px solid #0F9D58;
                 }
 
-                .card h3 {
-                    margin: 0;
-                    font-size: 14px;
-                    color: #6B7280;
-                }
-
                 .card p {
-                    font-size: 26px;
-                    margin: 5px 0 0;
+                    font-size: 24px;
                     font-weight: bold;
                     color: #0F9D58;
                 }
@@ -142,7 +123,6 @@ module.exports = function(app, supabase) {
                     background: white;
                     border-radius: 12px;
                     overflow: hidden;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
                 }
 
                 th, td {
@@ -168,7 +148,6 @@ module.exports = function(app, supabase) {
                     border-radius: 20px;
                     color: white;
                     font-size: 12px;
-                    font-weight: 500;
                 }
             </style>
         </head>
@@ -176,29 +155,17 @@ module.exports = function(app, supabase) {
         <body>
 
             <div class="header">
-                <h1>💚 Chumz Support Dashboard</h1>
-                <a href="/export" class="export-btn">⬇ Export Excel</a>
+                <h2>💚 Chumz Support Dashboard</h2>
+                <a href="/export" class="export-btn">⬇ Export</a>
             </div>
 
             <div class="container">
 
                 <div class="cards">
-                    <div class="card">
-                        <h3>Total Calls</h3>
-                        <p>${total}</p>
-                    </div>
-                    <div class="card">
-                        <h3>Login Issues</h3>
-                        <p>${login}</p>
-                    </div>
-                    <div class="card">
-                        <h3>Deposit Issues</h3>
-                        <p>${deposit}</p>
-                    </div>
-                    <div class="card">
-                        <h3>Agent Requests</h3>
-                        <p>${agent}</p>
-                    </div>
+                    <div class="card"><p>${total}</p>Total Calls</div>
+                    <div class="card"><p>${login}</p>Login Issues</div>
+                    <div class="card"><p>${deposit}</p>Deposit Issues</div>
+                    <div class="card"><p>${agent}</p>Agent Requests</div>
                 </div>
 
                 <table>
@@ -219,34 +186,18 @@ module.exports = function(app, supabase) {
         res.send(html);
     });
 
-    // 📥 EXPORT CSV (Excel)
+    // 📥 EXPORT
     app.get('/export', async (req, res) => {
-        const { data, error } = await supabase
-            .from('call_logs')
-            .select('*')
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            console.error(error);
-            return res.send('Error exporting data');
-        }
-
-        function formatOption(option) {
-            if (option === '1') return 'Login Issue';
-            if (option === '2') return 'Deposit Issue';
-            if (option === '3') return 'Agent Request';
-            if (option === '9') return 'Repeat Menu';
-            return option;
-        }
+        const { data } = await supabase.from('call_logs').select('*');
 
         let csv = 'Caller,Issue,Time\n';
 
         data.forEach(row => {
-            csv += `${row.caller},${formatOption(row.option_pressed)},${new Date(row.created_at).toLocaleString()}\n`;
+            csv += `${row.caller},${row.option_pressed},${row.created_at}\n`;
         });
 
         res.header('Content-Type', 'text/csv');
-        res.attachment('chumz-call-logs.csv');
+        res.attachment('logs.csv');
         res.send(csv);
     });
 
