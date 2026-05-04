@@ -1,11 +1,11 @@
 module.exports = function(app, supabase) {
 
     function formatOption(option) {
-        if (option === '1') return 'Login Issue';
-        if (option === '2') return 'Deposit Issue';
-        if (option === '3') return 'Agent Request';
-        if (option === '9') return 'Repeat Menu';
-        return option;
+        if (option === '1') return { label: 'Login Issue', color: '#2563EB' };
+        if (option === '2') return { label: 'Deposit Issue', color: '#F59E0B' };
+        if (option === '3') return { label: 'Agent Request', color: '#10B981' };
+        if (option === '9') return { label: 'Repeat Menu', color: '#6B7280' };
+        return { label: option, color: '#6B7280' };
     }
 
     app.get('/dashboard', async (req, res) => {
@@ -20,7 +20,6 @@ module.exports = function(app, supabase) {
             return res.send('Error loading dashboard');
         }
 
-        // 📊 Stats
         const total = data.length;
         const login = data.filter(d => d.option_pressed === '1').length;
         const deposit = data.filter(d => d.option_pressed === '2').length;
@@ -29,10 +28,16 @@ module.exports = function(app, supabase) {
         let rows = '';
 
         data.forEach(row => {
+            const option = formatOption(row.option_pressed);
+
             rows += `
             <tr>
                 <td>${row.caller}</td>
-                <td>${formatOption(row.option_pressed)}</td>
+                <td>
+                    <span class="badge" style="background:${option.color}">
+                        ${option.label}
+                    </span>
+                </td>
                 <td>${new Date(row.created_at).toLocaleString()}</td>
             </tr>
             `;
@@ -42,16 +47,35 @@ module.exports = function(app, supabase) {
         <html>
         <head>
             <title>Chumz Dashboard</title>
+
+            <!-- Auto refresh every 10 seconds -->
+            <meta http-equiv="refresh" content="10">
+
             <style>
                 body {
-                    font-family: Arial, sans-serif;
-                    background: #f5f7fb;
+                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                    background: #F5F7FB;
                     margin: 0;
-                    padding: 20px;
+                    padding: 0;
+                    color: #1F2937;
                 }
 
-                h1 {
-                    margin-bottom: 20px;
+                .header {
+                    background: #0F9D58;
+                    color: white;
+                    padding: 20px 30px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+
+                .header h1 {
+                    margin: 0;
+                    font-size: 20px;
+                }
+
+                .container {
+                    padding: 25px;
                 }
 
                 .cards {
@@ -64,75 +88,99 @@ module.exports = function(app, supabase) {
                 .card {
                     background: white;
                     padding: 20px;
-                    border-radius: 10px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                    border-radius: 12px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                    border-left: 5px solid #0F9D58;
                 }
 
                 .card h3 {
                     margin: 0;
                     font-size: 14px;
-                    color: #777;
+                    color: #6B7280;
                 }
 
                 .card p {
-                    font-size: 24px;
+                    font-size: 26px;
                     margin: 5px 0 0;
                     font-weight: bold;
+                    color: #0F9D58;
                 }
 
                 table {
                     width: 100%;
                     border-collapse: collapse;
                     background: white;
-                    border-radius: 10px;
+                    border-radius: 12px;
                     overflow: hidden;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
                 }
 
                 th, td {
-                    padding: 12px;
+                    padding: 14px;
                     text-align: left;
                 }
 
                 th {
-                    background: #f0f2f5;
+                    background: #0F9D58;
+                    color: white;
                 }
 
                 tr:nth-child(even) {
-                    background: #fafafa;
+                    background: #F9FAFB;
+                }
+
+                tr:hover {
+                    background: #ECFDF5;
+                }
+
+                .badge {
+                    padding: 6px 10px;
+                    border-radius: 20px;
+                    color: white;
+                    font-size: 12px;
+                    font-weight: 500;
                 }
             </style>
         </head>
+
         <body>
 
-            <h1>📊 Chumz Call Dashboard</h1>
-
-            <div class="cards">
-                <div class="card">
-                    <h3>Total Calls</h3>
-                    <p>${total}</p>
-                </div>
-                <div class="card">
-                    <h3>Login Issues</h3>
-                    <p>${login}</p>
-                </div>
-                <div class="card">
-                    <h3>Deposit Issues</h3>
-                    <p>${deposit}</p>
-                </div>
-                <div class="card">
-                    <h3>Agent Requests</h3>
-                    <p>${agent}</p>
-                </div>
+            <div class="header">
+                <h1>💚 Chumz Support Dashboard</h1>
+                <div>Live View</div>
             </div>
 
-            <table>
-                <tr>
-                    <th>Caller</th>
-                    <th>Issue</th>
-                    <th>Time</th>
-                </tr>
-                ${rows}
-            </table>
+            <div class="container">
+
+                <div class="cards">
+                    <div class="card">
+                        <h3>Total Calls</h3>
+                        <p>${total}</p>
+                    </div>
+                    <div class="card">
+                        <h3>Login Issues</h3>
+                        <p>${login}</p>
+                    </div>
+                    <div class="card">
+                        <h3>Deposit Issues</h3>
+                        <p>${deposit}</p>
+                    </div>
+                    <div class="card">
+                        <h3>Agent Requests</h3>
+                        <p>${agent}</p>
+                    </div>
+                </div>
+
+                <table>
+                    <tr>
+                        <th>Caller</th>
+                        <th>Issue</th>
+                        <th>Time</th>
+                    </tr>
+                    ${rows}
+                </table>
+
+            </div>
 
         </body>
         </html>
