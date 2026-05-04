@@ -2,39 +2,88 @@ const AfricasTalking = require('africastalking');
 
 module.exports = function(app) {
 
-    const africastalking = AfricasTalking({
-        apiKey: process.env.AT_API_KEY,
-        username: process.env.AT_USERNAME
-    });
+  const africastalking = AfricasTalking({
+    apiKey: process.env.AT_API_KEY,
+    username: process.env.AT_USERNAME
+  });
 
-    const voice = africastalking.VOICE;
+  const voice = africastalking.VOICE;
 
-    // 📞 Outbound Call Route
-    app.post('/call', async (req, res) => {
-        const phone = req.body.phone;
+  const AT_NUMBER = process.env.AT_VOICE_NUMBER;
 
-        if (!phone) {
-            return res.send('Missing phone number');
-        }
+  // 🔧 Helper: format phone numbers
+  function formatPhone(phone) {
+    if (!phone) return null;
 
-        try {
-            const response = await voice.call({
-                callFrom: '+254711082161', // your AT number
-                callTo: [
-                    { phoneNumber: '+254717134114' }, // agent
-                    { phoneNumber: phone }           // customer
-                ]
-            });
+    phone = phone.trim();
 
-            console.log('📞 Call started:', response);
+    if (phone.startsWith('0')) {
+      return '254' + phone.substring(1);
+    }
 
-            // redirect back to dashboard
-            res.redirect('/dashboard');
+    if (phone.startsWith('+254')) {
+      return phone.substring(1);
+    }
 
-        } catch (error) {
-            console.error('❌ Call error:', error);
-            res.send('Call failed');
-        }
-    });
+    return phone;
+  }
+
+  // 📞 Trigger outbound call
+  app.post('/call', async (req, res) => {
+    const phone = req.body.phone;
+
+    if (!phone) {
+      return res.send('Missing phone number');
+    }
+
+    if (!AT_NUMBER) {
+      console.error('❌ AT_VOICE_NUMBER is not set');
+      return res.send('Server config error');
+    }
+
+    const customer = formatPhone(phone);
+
+    try {
+      console.log("📞 Calling:", customer);
+
+      const response = await voice.call({
+        callFrom: AT_NUMBER,
+        to: [customer]
+      });
+
+      console.log('✅ Call initiated:', response);
+
+      res.redirect('/dashboard');
+
+    } catch (error) {
+      console.error('❌ Call error:', error.response?.data || error.message);
+      res.send('Call failed');
+    }
+  });
+
+  // ☎️ Voice callback
+  app.post('/voice', (req, res) => {
+    const isActive = req.body.isActive;
+
+    let response = '<?xml version="1.0" encoding="UTF-8"?>';
+
+    if (isActive === '1') {
+      response += `
+        <Response>
+          <Say voice="woman">Please wait while we connect your call.</Say>
+          <Dial phoneNumbers="254717134114" record="true"/>
+        </Response>
+      `;
+    } else {
+      response += `
+        <Response>
+          <Say>Goodbye</Say>
+        </Response>
+      `;
+    }
+
+    res.set('Content-Type', 'text/xml');
+    res.send(response);
+  });
 
 };
