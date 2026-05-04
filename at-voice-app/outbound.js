@@ -10,42 +10,54 @@ module.exports = function (app) {
     const voice = africastalking.VOICE;
     const AT_NUMBER = process.env.AT_VOICE_NUMBER;
 
-    // 🔧 Normalize
+    // 🔧 Normalize phone to +254 format
     function normalize(phone) {
         if (!phone) return null;
 
         phone = phone.replace(/\s+/g, '').trim();
 
-        if (phone.startsWith('0')) return '+254' + phone.substring(1);
+        if (phone.startsWith('+254')) return phone;
+
         if (phone.startsWith('254')) return '+' + phone;
+
+        if (phone.startsWith('0')) return '+254' + phone.substring(1);
 
         return phone;
     }
 
+    // 🔒 Validate Kenyan mobile numbers (supports Safaricom, Airtel, new ranges)
     function isValid(phone) {
-        return /^\+254(7\d{8}|11\d{7})$/.test(phone);
+        return /^\+254\d{9}$/.test(phone);
     }
 
+    // 📞 CALL ROUTE (GET + POST supported)
     app.all('/call', async (req, res) => {
         console.log("🔥 /call route hit");
 
         let phone = req.body.phone || req.query.phone;
 
         if (!phone) {
-            return res.status(400).send('Missing phone');
+            return res.status(400).send('Missing phone number');
         }
 
         phone = normalize(phone);
 
-        if (!isValid(phone)) {
-            console.log("❌ Invalid:", phone);
-            return res.status(400).send('Invalid phone');
+        if (!phone || !isValid(phone)) {
+            console.log("❌ Invalid number:", phone);
+            return res.status(400).send('Invalid phone number');
+        }
+
+        if (!AT_NUMBER) {
+            console.error("❌ AT_VOICE_NUMBER not set");
+            return res.status(500).send('Server misconfigured');
         }
 
         try {
+            console.log("📞 Calling:", phone);
+
             const payload = {
-                callFrom: AT_NUMBER,
-                callTo: [phone]
+                callFrom: AT_NUMBER,   // must be +254...
+                callTo: [phone]        // must be +254...
             };
 
             console.log("📦 Payload:", payload);
@@ -54,11 +66,21 @@ module.exports = function (app) {
 
             console.log("✅ Call started:", response);
 
-            res.send('Calling ' + phone);
+            res.send(`Calling ${phone}`);
 
         } catch (error) {
-            console.error("❌ ERROR:", error.response?.data || error.message);
+
+            console.error("❌ RAW ERROR:", error);
+
+            if (error.response) {
+                console.error("❌ STATUS:", error.response.status);
+                console.error("❌ DATA:", error.response.data);
+            }
+
+            console.error("❌ MESSAGE:", error.message);
+
             res.status(500).send('Call failed');
         }
     });
+
 };
