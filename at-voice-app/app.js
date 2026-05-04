@@ -6,7 +6,7 @@ const app = express();
 // Parse incoming POST data
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// ✅ Health check
+// Health check
 app.get('/', (req, res) => {
     res.send('✅ Chumz IVR app is running');
 });
@@ -19,9 +19,10 @@ app.post('/voice', (req, res) => {
     const response =
         '<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
-            '<GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
+            '<GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
                 '<Say>' +
                 'Welcome to Chumz customer support. ' +
+                'Please listen carefully and make your selection. ' +
                 'Press 1 for login issues. ' +
                 'Press 2 for deposit issues. ' +
                 'Press 3 to speak to a support agent. ' +
@@ -35,14 +36,14 @@ app.post('/voice', (req, res) => {
     res.send(response);
 });
 
-// 🔁 STEP 2: Retry Menu (if no input)
+// 🔁 STEP 2: Retry Menu
 app.post('/retry', (req, res) => {
     console.log('--- Retry Menu ---');
 
     const response =
         '<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
-            '<GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
+            '<GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
                 '<Say>' +
                 'We did not receive your input. ' +
                 'Press 1 for login issues. ' +
@@ -65,7 +66,6 @@ app.post('/handle-input', (req, res) => {
 
     const digit = req.body.digits;
 
-    // ⏰ Business hours (8 AM - 5 PM)
     const now = new Date();
     const hour = now.getHours();
     const isBusinessHours = hour >= 8 && hour < 17;
@@ -73,7 +73,6 @@ app.post('/handle-input', (req, res) => {
     let response;
 
     if (digit === '1') {
-        // Login issues
         response =
             '<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
@@ -84,17 +83,15 @@ app.post('/handle-input', (req, res) => {
             '</Response>';
     } 
     else if (digit === '2') {
-        // Deposit issues
         response =
             '<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
                 '<Say>' +
-                'For missed deposits, please forward your M Pesa message to our WhatsApp line 0717134114 and we will help reconcile. Goodbye.' +
+                'For missed deposits, please forward your M Pesa message to our WhatsApp line 0717134114. Goodbye.' +
                 '</Say>' +
             '</Response>';
     } 
     else if (digit === '3') {
-        // Speak to agent
         if (isBusinessHours) {
             response =
                 '<?xml version="1.0" encoding="UTF-8"?>' +
@@ -114,7 +111,6 @@ app.post('/handle-input', (req, res) => {
         }
     } 
     else if (digit === '9') {
-        // Repeat menu
         response =
             '<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
@@ -122,7 +118,6 @@ app.post('/handle-input', (req, res) => {
             '</Response>';
     } 
     else {
-        // Invalid input
         response =
             '<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
@@ -135,7 +130,7 @@ app.post('/handle-input', (req, res) => {
     res.send(response);
 });
 
-// ✅ Start server (Render compatible)
+// Start server
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
