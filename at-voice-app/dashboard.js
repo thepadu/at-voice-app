@@ -8,6 +8,13 @@ module.exports = function(app, supabase) {
         return { label: option, color: '#6B7280' };
     }
 
+    function formatStatus(status) {
+        if (status === 'completed') return { label: 'Completed', color: '#10B981' };
+        if (status === 'ongoing') return { label: 'Ongoing', color: '#3B82F6' };
+        if (status === 'failed') return { label: 'Failed', color: '#EF4444' };
+        return { label: status || 'Unknown', color: '#6B7280' };
+    }
+
     // 📊 DASHBOARD
     app.get('/dashboard', async (req, res) => {
         const { data, error } = await supabase
@@ -30,6 +37,7 @@ module.exports = function(app, supabase) {
 
         data.forEach(row => {
             const option = formatOption(row.option_pressed);
+            const status = formatStatus(row.status);
 
             rows += `
             <tr>
@@ -53,6 +61,12 @@ module.exports = function(app, supabase) {
                         ${option.label}
                     </span>
                 </td>
+                <td>
+                    <span class="badge" style="background:${status.color}">
+                        ${status.label}
+                    </span>
+                </td>
+                <td>${row.duration || 0}s</td>
                 <td>${new Date(row.created_at).toLocaleString()}</td>
             </tr>
             `;
@@ -149,6 +163,14 @@ module.exports = function(app, supabase) {
                     color: white;
                     font-size: 12px;
                 }
+
+                .dialer {
+                    background:white;
+                    padding:20px;
+                    border-radius:12px;
+                    margin-bottom:20px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                }
             </style>
         </head>
 
@@ -161,6 +183,16 @@ module.exports = function(app, supabase) {
 
             <div class="container">
 
+                <!-- 📞 DIALER -->
+                <div class="dialer">
+                    <h3>📞 Manual Dialer</h3>
+                    <input id="dialerInput" placeholder="0712345678" style="padding:10px;border-radius:8px;border:1px solid #ccc;margin-right:10px;">
+                    <button onclick="makeCall()" style="background:#0F9D58;color:white;border:none;padding:10px 15px;border-radius:8px;cursor:pointer;">
+                        Call
+                    </button>
+                    <p id="dialerError" style="color:red;"></p>
+                </div>
+
                 <div class="cards">
                     <div class="card"><p>${total}</p>Total Calls</div>
                     <div class="card"><p>${login}</p>Login Issues</div>
@@ -172,12 +204,49 @@ module.exports = function(app, supabase) {
                     <tr>
                         <th>Caller</th>
                         <th>Issue</th>
+                        <th>Status</th>
+                        <th>Duration</th>
                         <th>Time</th>
                     </tr>
                     ${rows}
                 </table>
 
             </div>
+
+            <script>
+                function formatPhone(phone) {
+                    phone = phone.replace(/\\s+/g, '').trim();
+                    if (phone.startsWith('0')) return '254' + phone.substring(1);
+                    if (phone.startsWith('+254')) return phone.substring(1);
+                    return phone;
+                }
+
+                function isValid(phone) {
+                    return /^254(7|1)\\d{8}$/.test(phone);
+                }
+
+                function makeCall() {
+                    let input = document.getElementById('dialerInput');
+                    let error = document.getElementById('dialerError');
+
+                    let phone = formatPhone(input.value);
+
+                    if (!isValid(phone)) {
+                        error.innerText = "Enter a valid Kenyan number";
+                        return;
+                    }
+
+                    error.innerText = "";
+
+                    fetch('/call', {
+                        method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ phone })
+                    });
+
+                    alert("📞 Calling " + phone);
+                }
+            </script>
 
         </body>
         </html>
@@ -190,10 +259,10 @@ module.exports = function(app, supabase) {
     app.get('/export', async (req, res) => {
         const { data } = await supabase.from('call_logs').select('*');
 
-        let csv = 'Caller,Issue,Time\n';
+        let csv = 'Caller,Issue,Status,Duration,Time\n';
 
         data.forEach(row => {
-            csv += `${row.caller},${row.option_pressed},${row.created_at}\n`;
+            csv += `${row.caller},${row.option_pressed},${row.status || ''},${row.duration || 0},${row.created_at}\n`;
         });
 
         res.header('Content-Type', 'text/csv');
