@@ -7,60 +7,48 @@ const outboundRoutes = require('./outbound');
 
 const app = express();
 
-// Parse POST data
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Supabase client
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_KEY
 );
 
-// 🔧 GLOBAL PHONE NORMALIZER
+// 🔧 Normalize phone
 function normalizePhone(phone) {
     if (!phone) return null;
-
     phone = phone.replace(/\s+/g, '').trim();
-
     if (phone.startsWith('+254')) return phone.substring(1);
     if (phone.startsWith('0')) return '254' + phone.substring(1);
-
     return phone;
 }
 
-// Make available to other files
 app.locals.normalizePhone = normalizePhone;
 
-// Initialize routes
+// Routes
 dashboardRoutes(app, supabase);
 outboundRoutes(app);
 
-// Health check
+// Health
 app.get('/', (req, res) => {
-    res.send('✅ Chumz IVR app is running');
+    res.send('✅ Chumz IVR running');
 });
 
 
-// 🎯 VOICE ENTRY (handles BOTH inbound & outbound)
+// 🎯 VOICE ENTRY
 app.post('/voice', (req, res) => {
-    console.log('--- Voice Event ---');
-    console.log(req.body);
-
     const direction = req.body.direction;
 
     let response = '<?xml version="1.0" encoding="UTF-8"?>';
 
-    // 📞 OUTBOUND CALL → connect immediately
     if (direction === 'outbound') {
         response += `
         <Response>
             <Say>Please wait while we connect your call.</Say>
             <Dial phoneNumbers="254717134114" record="true"/>
         </Response>`;
-    } 
-    // ☎️ INBOUND CALL → IVR menu
-    else {
+    } else {
         response += `
         <Response>
             <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
@@ -81,90 +69,33 @@ app.post('/voice', (req, res) => {
 });
 
 
-// 🔁 RETRY MENU
-app.post('/retry', (req, res) => {
-    const response = `
-    <?xml version="1.0" encoding="UTF-8"?>
-    <Response>
-        <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
-            <Say>
-            We did not receive your input.
-            Press 1 for login issues.
-            Press 2 for deposit issues.
-            Press 3 to speak to a support agent.
-            Press 9 to repeat this menu.
-            </Say>
-        </GetDigits>
-        <Say>No input received. Goodbye.</Say>
-    </Response>`;
-
-    res.set('Content-Type', 'application/xml');
-    res.send(response);
-});
-
-
 // 🎯 HANDLE INPUT
 app.post('/handle-input', async (req, res) => {
-    console.log('--- User Input ---');
-    console.log(req.body);
-
     const digit = req.body.dtmfDigits || req.body.digits;
     const caller = normalizePhone(req.body.callerNumber);
     const sessionId = req.body.sessionId;
 
-    // Save to Supabase
-    const { error } = await supabase.from('call_logs').insert([
+    await supabase.from('call_logs').insert([
         {
             caller,
             option_pressed: digit,
-            session_id: sessionId
+            session_id: sessionId,
+            status: 'menu'
         }
     ]);
 
-    if (error) console.error('Supabase error:', error);
-
-    const hour = new Date().getHours();
-    const isBusinessHours = hour >= 8 && hour < 17;
-
     let response = '<?xml version="1.0" encoding="UTF-8"?>';
 
-    if (digit === '1') {
+    if (digit === '3') {
         response += `
         <Response>
-            <Say>For login issues, please update the Chumz app and reset your PIN. Goodbye.</Say>
+            <Say>Connecting you to a support agent</Say>
+            <Dial phoneNumbers="254717134114" record="true"/>
         </Response>`;
-    } 
-    else if (digit === '2') {
+    } else {
         response += `
         <Response>
-            <Say>For missed deposits, forward your M Pesa message to our WhatsApp line 0717134114. Goodbye.</Say>
-        </Response>`;
-    } 
-    else if (digit === '3') {
-        if (isBusinessHours) {
-            response += `
-            <Response>
-                <Say>Connecting you to a support agent</Say>
-                <Dial phoneNumbers="254717134114" record="true"/>
-            </Response>`;
-        } else {
-            response += `
-            <Response>
-                <Say>Our agents are unavailable. Please contact us during working hours.</Say>
-            </Response>`;
-        }
-    } 
-    else if (digit === '9') {
-        response += `
-        <Response>
-            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
-        </Response>`;
-    } 
-    else {
-        response += `
-        <Response>
-            <Say>Invalid input. Please try again.</Say>
-            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
+            <Say>Thank you. Goodbye.</Say>
         </Response>`;
     }
 
@@ -173,7 +104,41 @@ app.post('/handle-input', async (req, res) => {
 });
 
 
-// Start server
+// 📡 EVENTS CALLBACK (CALL STATUS)
+app.post('/events', async (req, res) => {
+    console.log('📡 EVENT:', req.body);
+
+    const {
+        sessionId,
+        isActive,
+        durationInSeconds,
+        direction,
+        callerNumber
+    } = req.body;
+
+    const caller = normalizePhone(callerNumber);
+
+    let status = 'unknown';
+
+    if (isActive === '1') status = 'ongoing';
+    if (isActive === '0' && durationInSeconds > 0) status = 'completed';
+    if (isActive === '0' && durationInSeconds == 0) status = 'failed';
+
+    await supabase.from('call_logs').insert([
+        {
+            caller,
+            session_id: sessionId,
+            status,
+            duration: durationInSeconds,
+            direction
+        }
+    ]);
+
+    res.sendStatus(200);
+});
+
+
+// Start
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
