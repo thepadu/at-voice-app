@@ -41,8 +41,24 @@ module.exports = function(app, supabase) {
                 </td>
                 <td>${new Date(row.created_at).toLocaleString()}</td>
             </tr>
-            `;
-        });
+            
+         
+            <tr>
+                <td>
+                    ${row.caller}
+                    <form method="POST" action="/call" style="display:inline;">
+                        <input type="hidden" name="phone" value="${row.caller}">
+                        <button style="margin-left:8px;">📞</button>
+                    </form>
+                </td>
+                <td>
+                    <span class="badge" style="background:${option.color}">
+                        ${option.label}
+                    </span>
+                </td>
+                <td>${new Date(row.created_at).toLocaleString()}</td>
+            </tr>
+           `;
 
         const html = `
         <html>
