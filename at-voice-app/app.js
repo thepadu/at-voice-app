@@ -2,35 +2,31 @@ const express = require('express');
 const bodyParser = require('body-parser');
 
 const app = express();
+
+// Parse incoming POST data
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Health check
+// ✅ Health check
 app.get('/', (req, res) => {
     res.send('✅ IVR app is running');
 });
 
-// Step 1: Incoming call → show menu
+// 🎯 Step 1: Incoming call → IVR menu
 app.post('/voice', (req, res) => {
     console.log('--- Incoming Call ---');
     console.log(req.body);
 
     const response = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input"">
-        <Say voice="woman">
-            Welcome to chumz support. Press 1 to speak to a Customer Support Champion. 
-            Press 2 for chumz business hours.
-        </Say>
-    </GetDigits>
-
-    <Say>No input received. Goodbye.</Say>
+    <Say voice="woman">Welcome to chumz support. Press 1 for speak to a customer support champion. Press 2 for business hours.</Say>
+    <GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input"/>
 </Response>`;
 
-    res.set('Content-Type', 'text/plain');
+    res.set('Content-Type', 'application/xml');
     res.send(response);
 });
 
-// Step 2: Handle user input
+// 🎯 Step 2: Handle key press
 app.post('/handle-input', (req, res) => {
     console.log('--- User Input ---');
     console.log(req.body);
@@ -40,32 +36,31 @@ app.post('/handle-input', (req, res) => {
     let response;
 
     if (digit === '1') {
-        // Connect to your phone
         response = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say>Connecting you to support</Say>
-    <Dial phoneNumbers="+254706651053"/>
+    <Dial phoneNumbers="+254706651053" record="true"/>
 </Response>`;
-    } else if (digit === '2') {
-        // Play info
+    } 
+    else if (digit === '2') {
         response = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say>We are open Monday to Friday, 8 AM to 5 PM. Goodbye.</Say>
 </Response>`;
-    } else {
-        // Invalid input
+    } 
+    else {
         response = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say>Invalid input. Please try again.</Say>
-    <Redirect>/voice</Redirect>
+    <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
 </Response>`;
     }
 
-    res.set('Content-Type', 'text/plain');
+    res.set('Content-Type', 'application/xml');
     res.send(response);
 });
 
-// Start server
+// ✅ Start server (Render-compatible)
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
