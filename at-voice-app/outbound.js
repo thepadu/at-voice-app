@@ -58,7 +58,9 @@ module.exports = function (app) {
 
             const payload = {
                 callFrom: AT_NUMBER,   // must be +254...
-                callTo: [phone]        // must be 254...
+                callTo:  [
+                    { phoneNumber: phone }
+    ]        // must be 254...
             };
 
             console.log('📦 Payload:', payload);
