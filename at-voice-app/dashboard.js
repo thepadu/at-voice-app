@@ -8,6 +8,7 @@ module.exports = function(app, supabase) {
         return { label: option, color: '#6B7280' };
     }
 
+    // 📊 DASHBOARD
     app.get('/dashboard', async (req, res) => {
         const { data, error } = await supabase
             .from('call_logs')
@@ -48,7 +49,6 @@ module.exports = function(app, supabase) {
         <head>
             <title>Chumz Dashboard</title>
 
-            <!-- Auto refresh every 10 seconds -->
             <meta http-equiv="refresh" content="10">
 
             <style>
@@ -72,6 +72,20 @@ module.exports = function(app, supabase) {
                 .header h1 {
                     margin: 0;
                     font-size: 20px;
+                }
+
+                .export-btn {
+                    background: white;
+                    color: #0F9D58;
+                    padding: 8px 14px;
+                    border-radius: 6px;
+                    text-decoration: none;
+                    font-weight: bold;
+                    font-size: 14px;
+                }
+
+                .export-btn:hover {
+                    background: #ECFDF5;
                 }
 
                 .container {
@@ -147,7 +161,7 @@ module.exports = function(app, supabase) {
 
             <div class="header">
                 <h1>💚 Chumz Support Dashboard</h1>
-                <div>Live View</div>
+                <a href="/export" class="export-btn">⬇ Export Excel</a>
             </div>
 
             <div class="container">
@@ -188,4 +202,36 @@ module.exports = function(app, supabase) {
 
         res.send(html);
     });
+
+    // 📥 EXPORT CSV (Excel)
+    app.get('/export', async (req, res) => {
+        const { data, error } = await supabase
+            .from('call_logs')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error(error);
+            return res.send('Error exporting data');
+        }
+
+        function formatOption(option) {
+            if (option === '1') return 'Login Issue';
+            if (option === '2') return 'Deposit Issue';
+            if (option === '3') return 'Agent Request';
+            if (option === '9') return 'Repeat Menu';
+            return option;
+        }
+
+        let csv = 'Caller,Issue,Time\n';
+
+        data.forEach(row => {
+            csv += `${row.caller},${formatOption(row.option_pressed)},${new Date(row.created_at).toLocaleString()}\n`;
+        });
+
+        res.header('Content-Type', 'text/csv');
+        res.attachment('chumz-call-logs.csv');
+        res.send(csv);
+    });
+
 };
