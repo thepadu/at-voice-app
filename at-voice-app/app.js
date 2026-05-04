@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const { createClient } = require('@supabase/supabase-js');
 
 const dashboardRoutes = require('./dashboard');
+const outboundRoutes = require('./outbound');
 
 const app = express();
 
@@ -17,6 +18,7 @@ const supabase = createClient(
 
 // Initialize dashboard routes
 dashboardRoutes(app, supabase);
+outboundRoutes(app);
 
 // Health check
 app.get('/', (req, res) => {
