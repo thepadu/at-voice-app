@@ -64,7 +64,7 @@ app.post('/handle-input', (req, res) => {
     console.log('--- User Input ---');
     console.log(req.body);
 
-    const digit = req.body.digits;
+    const digit = req.body.dtmfDigits || req.body.digits;
 
     const now = new Date();
     const hour = now.getHours();
