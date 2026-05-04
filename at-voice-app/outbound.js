@@ -33,7 +33,7 @@ module.exports = function(app) {
 
             const response = await voice.call({
                 callFrom: AT_NUMBER,
-                to: [phone]
+                callto: [phone]
             });
 
             console.log('✅ Call started:', response);
