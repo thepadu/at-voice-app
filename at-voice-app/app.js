@@ -16,10 +16,10 @@ app.post('/voice', (req, res) => {
 
     const response = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <GetDigits timeout="10" numDigits="1" callbackUrl="/handle-input">
+    <GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input"">
         <Say voice="woman">
-            Welcome. Press 1 to speak to support. 
-            Press 2 for business hours.
+            Welcome to chumz support. Press 1 to speak to a Customer Support Champion. 
+            Press 2 for chumz business hours.
         </Say>
     </GetDigits>
 
