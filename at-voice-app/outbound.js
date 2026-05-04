@@ -53,12 +53,17 @@ module.exports = function (app) {
             return res.status(500).send('Server misconfigured');
         }
 
+        const AGENT_NUMBER = '254717134114'; // 🔁 change if needed
+
         try {
-            console.log('📞 Calling:', phone);
+            console.log('📞 Calling (bridged):', phone);
 
             const payload = {
-                callFrom: AT_NUMBER,   // +254...
-                callTo: [phone]        // ✅ CORRECT FORMAT
+                callFrom: AT_NUMBER,
+                callTo: [
+                    { phoneNumber: phone },         // 👤 customer
+                    { phoneNumber: AGENT_NUMBER }   // 🎧 agent
+                ]
             };
 
             console.log('📦 Payload:', payload);
