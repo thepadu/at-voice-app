@@ -10,23 +10,42 @@ module.exports = function (app) {
     const voice = africastalking.VOICE;
     const AT_NUMBER = process.env.AT_VOICE_NUMBER;
 
-    // 📞 BASIC TEST CALL (NO FORMATTING, NO VALIDATION)
-    app.get('/call', async (req, res) => {
+    // 📞 BASIC CALL TEST (handles GET + POST)
+    app.all('/call', async (req, res) => {
+        console.log("🔥 /call route hit");
+
+        if (!AT_NUMBER) {
+            console.error("❌ AT_VOICE_NUMBER not set");
+            return res.status(500).send('Server misconfigured');
+        }
+
         try {
             console.log("📞 Initiating test call...");
 
-            const response = await voice.call({
+            const payload = {
                 callFrom: AT_NUMBER,
-                callTo: ['254717134114'] // 🔁 replace with YOUR phone
-            });
+                callTo: ['254717134114'] // 🔁 replace with your phone
+            };
+
+            console.log("📦 Payload:", payload);
+
+            const response = await voice.call(payload);
 
             console.log("✅ Call response:", response);
 
-            res.send('Call initiated');
+            return res.send('Call initiated');
 
         } catch (error) {
-            console.error("❌ ERROR:", error);
-            res.send('Call failed');
+            console.error("❌ RAW ERROR:", error);
+
+            if (error.response) {
+                console.error("❌ STATUS:", error.response.status);
+                console.error("❌ DATA:", error.response.data);
+            }
+
+            console.error("❌ MESSAGE:", error.message);
+
+            return res.status(500).send('Call failed');
         }
     });
 
