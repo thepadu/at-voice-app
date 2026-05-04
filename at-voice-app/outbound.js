@@ -17,7 +17,7 @@ module.exports = function (app) {
         try {
             const payload = {
                 callFrom: AT_NUMBER,
-                callTo: ['+254717134114'] // ✅ IMPORTANT: include +
+                callTo: ['+254706651053'] // ✅ IMPORTANT: include +
             };
 
             console.log("📦 Payload:", payload);
