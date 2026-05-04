@@ -2,36 +2,70 @@ const express = require('express');
 const bodyParser = require('body-parser');
 
 const app = express();
-
-// Parse application/x-www-form-urlencoded
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// ✅ Health check route (open in browser)
+// Health check
 app.get('/', (req, res) => {
-    res.send('✅ AT Voice app is running');
+    res.send('✅ IVR app is running');
 });
 
-// 🎯 Voice callback endpoint
+// Step 1: Incoming call → show menu
 app.post('/voice', (req, res) => {
-    console.log('--- Incoming Voice Request ---');
-    console.log(req.body); // 🔥 Full debug payload
+    console.log('--- Incoming Call ---');
+    console.log(req.body);
 
-    const callerNumber = req.body.callerNumber || 'unknown';
+    const response = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <GetDigits timeout="10" numDigits="1" callbackUrl="/handle-input">
+        <Say voice="woman">
+            Welcome. Press 1 to speak to support. 
+            Press 2 for business hours.
+        </Say>
+    </GetDigits>
 
-    console.log("Incoming call from:", callerNumber);
-
-    const response = `
-        <Response>
-            <Say voice="woman">Connecting your call now</Say>
-            <Dial phoneNumbers="+254706651053" record="true"/>
-        </Response>
-    `;
+    <Say>No input received. Goodbye.</Say>
+</Response>`;
 
     res.set('Content-Type', 'text/plain');
     res.send(response);
 });
 
-// ✅ Use dynamic port for Render
+// Step 2: Handle user input
+app.post('/handle-input', (req, res) => {
+    console.log('--- User Input ---');
+    console.log(req.body);
+
+    const digit = req.body.digits;
+
+    let response;
+
+    if (digit === '1') {
+        // Connect to your phone
+        response = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>Connecting you to support</Say>
+    <Dial phoneNumbers="+254706651053"/>
+</Response>`;
+    } else if (digit === '2') {
+        // Play info
+        response = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>We are open Monday to Friday, 8 AM to 5 PM. Goodbye.</Say>
+</Response>`;
+    } else {
+        // Invalid input
+        response = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>Invalid input. Please try again.</Say>
+    <Redirect>/voice</Redirect>
+</Response>`;
+    }
+
+    res.set('Content-Type', 'text/plain');
+    res.send(response);
+});
+
+// Start server
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
