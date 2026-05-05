@@ -36,7 +36,7 @@ app.get('/', (req, res) => {
 });
 
 
-// 🎯 VOICE ENTRY (FAST + RELIABLE)
+// 🎯 VOICE ENTRY (FAST + SAFE)
 app.post('/voice', (req, res) => {
     console.log("📥 INBOUND CALL HIT");
 
@@ -44,14 +44,16 @@ app.post('/voice', (req, res) => {
 
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say>Welcome to Chumz customer support</Say>
     <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
         <Say>
+        Welcome to Chumz customer support.
         Press 1 for login issues.
         Press 2 for deposit issues.
         Press 3 to speak to a support agent.
+        Press 9 to repeat this menu.
         </Say>
     </GetDigits>
+    <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
 </Response>`);
 });
 
@@ -75,16 +77,36 @@ app.post('/handle-input', async (req, res) => {
 
     let response = '<?xml version="1.0" encoding="UTF-8"?>';
 
-    if (digit === '3') {
+    if (digit === '1') {
+        response += `
+        <Response>
+            <Say>For login issues, please update the Chumz app and reset your PIN. Goodbye.</Say>
+        </Response>`;
+    } 
+    else if (digit === '2') {
+        response += `
+        <Response>
+            <Say>For deposit issues, please forward your M Pesa message to WhatsApp 0717134114. Goodbye.</Say>
+        </Response>`;
+    } 
+    else if (digit === '3') {
         response += `
         <Response>
             <Say>Connecting you to a support agent</Say>
             <Dial phoneNumbers="+254717134114" record="true"/>
         </Response>`;
-    } else {
+    } 
+    else if (digit === '9') {
         response += `
         <Response>
-            <Say>Thank you. Goodbye.</Say>
+            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
+        </Response>`;
+    } 
+    else {
+        response += `
+        <Response>
+            <Say>Invalid input. Please try again.</Say>
+            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
         </Response>`;
     }
 
