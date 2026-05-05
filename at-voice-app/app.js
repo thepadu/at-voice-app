@@ -36,7 +36,7 @@ app.get('/', (req, res) => {
 });
 
 
-// 🎯 VOICE ENTRY (FIXED)
+// 🎯 VOICE ENTRY (FIXED IVR)
 app.post('/voice', (req, res) => {
     console.log("📥 INBOUND CALL HIT");
 
@@ -44,20 +44,21 @@ app.post('/voice', (req, res) => {
 
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say>Welcome to Chumz customer support</Say>
     <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
         <Say>
+        Welcome to Chumz customer support.
         Press 1 for login issues.
         Press 2 for deposit issues.
         Press 3 to speak to a support agent.
         Press 9 to repeat this menu.
         </Say>
     </GetDigits>
+    <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
 </Response>`);
 });
 
 
-// 🎯 HANDLE INPUT (IVR LOGIC)
+// 🎯 HANDLE INPUT
 app.post('/handle-input', async (req, res) => {
     console.log("📥 IVR input:", req.body);
 
@@ -114,7 +115,7 @@ app.post('/handle-input', async (req, res) => {
 });
 
 
-// 📡 EVENTS CALLBACK (CALL STATUS)
+// 📡 EVENTS CALLBACK
 app.post('/events', async (req, res) => {
     console.log('📡 EVENT:', req.body);
 
@@ -148,7 +149,7 @@ app.post('/events', async (req, res) => {
 });
 
 
-// Start
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
