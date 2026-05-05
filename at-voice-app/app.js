@@ -15,7 +15,7 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
-// 🔧 CONFIG (clean + scalable)
+// 🔧 CONFIG
 const AGENTS = [
     "+254717134114",
     "+254740323941"
@@ -40,11 +40,11 @@ outboundRoutes(app);
 
 // Health
 app.get('/', (req, res) => {
-    res.send('✅ Chumz IVR running');
+    res.send('✅ choomz IVR running');
 });
 
 
-// 🔹 ENTRY (FAST)
+// 🔹 ENTRY
 app.post('/voice', (req, res) => {
     res.set('Content-Type', 'application/xml');
 
@@ -55,18 +55,28 @@ app.post('/voice', (req, res) => {
 });
 
 
-// 🔹 IVR MENU
-app.post('/ivr', (req, res) => {
+// 🔹 IVR MENU + LOG ENTRY
+app.post('/ivr', async (req, res) => {
+
+    const caller = normalizePhone(req.body.callerNumber);
+    const sessionId = req.body.sessionId;
+
+    // ✅ Log IVR start
+    await supabase.from('call_logs').upsert({
+        session_id: sessionId,
+        caller,
+        status: 'ivr_started'
+    }, { onConflict: 'session_id' });
+
     res.set('Content-Type', 'application/xml');
 
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
 
             `<GetDigits timeout="${IVR_TIMEOUT}" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">` +
-                '<Say>Welcome to Chumz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent. Press 9 to repeat this menu.</Say>' +
+                '<Say>Welcome to choomz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent. Press 9 to repeat this menu.</Say>' +
             '</GetDigits>' +
 
-            // 👇 No input fallback
             '<Say>No option was selected.</Say>' +
             '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
 
@@ -74,33 +84,30 @@ app.post('/ivr', (req, res) => {
 });
 
 
-// 🔹 HANDLE INPUT
+// 🔹 HANDLE INPUT + LOG
 app.post('/handle-input', async (req, res) => {
 
     const digit = req.body.dtmfDigits || req.body.digits;
     const caller = normalizePhone(req.body.callerNumber);
     const sessionId = req.body.sessionId;
 
-    await supabase.from('call_logs').insert([
-        {
-            caller,
-            option_pressed: digit,
-            session_id: sessionId,
-            status: 'menu'
-        }
-    ]);
+    // ✅ Log input
+    await supabase.from('call_logs').upsert({
+        session_id: sessionId,
+        caller,
+        option_pressed: digit,
+        status: 'input_received'
+    }, { onConflict: 'session_id' });
 
     res.set('Content-Type', 'application/xml');
 
-    // 🔹 OPTION 1
     if (digit === '1') {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
-                '<Say>For login issues, please update the Chumz app and reset your PIN. Goodbye.</Say>' +
+                '<Say>For login issues, please update the choomz app and reset your PIN. Goodbye.</Say>' +
             '</Response>');
     }
 
-    // 🔹 OPTION 2
     if (digit === '2') {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
@@ -108,19 +115,16 @@ app.post('/handle-input', async (req, res) => {
             '</Response>');
     }
 
-    // 🔹 OPTION 3 → AGENT FLOW
     if (digit === '3') {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
 
                 '<Say>Please hold as your call is transferred to an available agent.</Say>' +
 
-                // First agent
                 `<Dial phoneNumbers="${AGENTS[0]}" timeout="15" record="true"/>` +
 
                 '<Say>The first agent did not pick. Proceeding to the next available agent.</Say>' +
 
-                // Second agent
                 `<Dial phoneNumbers="${AGENTS[1]}" timeout="15" record="true"/>` +
 
                 '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>' +
@@ -128,7 +132,6 @@ app.post('/handle-input', async (req, res) => {
             '</Response>');
     }
 
-    // 🔹 OPTION 9 → REPEAT MENU
     if (digit === '9') {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
@@ -136,7 +139,6 @@ app.post('/handle-input', async (req, res) => {
             '</Response>');
     }
 
-    // 🔹 INVALID INPUT
     return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
             '<Say>Invalid input. Please try again.</Say>' +
@@ -145,7 +147,7 @@ app.post('/handle-input', async (req, res) => {
 });
 
 
-// 📡 EVENTS CALLBACK
+// 🔹 EVENTS CALLBACK (UPSERT)
 app.post('/events', async (req, res) => {
     console.log('📡 EVENT:', req.body);
 
@@ -165,21 +167,19 @@ app.post('/events', async (req, res) => {
     if (isActive === '0' && durationInSeconds > 0) status = 'completed';
     if (isActive === '0' && durationInSeconds == 0) status = 'failed';
 
-    await supabase.from('call_logs').insert([
-        {
-            caller,
-            session_id: sessionId,
-            status,
-            duration: durationInSeconds,
-            direction
-        }
-    ]);
+    await supabase.from('call_logs').upsert({
+        session_id: sessionId,
+        caller,
+        status,
+        duration: durationInSeconds,
+        direction
+    }, { onConflict: 'session_id' });
 
     res.sendStatus(200);
 });
 
 
-// Start
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
