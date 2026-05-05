@@ -36,7 +36,7 @@ app.get('/', (req, res) => {
 });
 
 
-// 🔹 ENTRY POINT (FAST ONLY)
+// 🔹 ENTRY POINT (FAST)
 app.post('/voice', (req, res) => {
     console.log("📥 ENTRY HIT");
 
@@ -58,7 +58,7 @@ app.post('/ivr', (req, res) => {
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
             '<GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
-                '<Say>Welcome to Choomz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent.</Say>' +
+                '<Say>Welcome to Choomz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent. Press 9 to repeat this menu.</Say>' +
             '</GetDigits>' +
             '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
         '</Response>');
@@ -103,6 +103,12 @@ app.post('/handle-input', async (req, res) => {
                 '<Dial phoneNumbers="+254717134114" record="true"/>' +
             '</Response>');
     } 
+    else if (digit === '9') {
+        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+            '</Response>');
+    }
     else {
         res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
