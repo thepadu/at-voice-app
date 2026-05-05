@@ -36,29 +36,36 @@ app.get('/', (req, res) => {
 });
 
 
-// 🎯 VOICE ENTRY (FIXED IVR)
+// 🔹 ENTRY POINT (FAST ONLY)
 app.post('/voice', (req, res) => {
-    console.log("📥 INBOUND CALL HIT");
+    console.log("📥 ENTRY HIT");
 
     res.set('Content-Type', 'application/xml');
 
-    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
-        <Say>
-        Welcome to Chumz customer support.
-        Press 1 for login issues.
-        Press 2 for deposit issues.
-        Press 3 to speak to a support agent.
-        Press 9 to repeat this menu.
-        </Say>
-    </GetDigits>
-    <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
-</Response>`);
+    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+        '<Response>' +
+            '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+        '</Response>');
 });
 
 
-// 🎯 HANDLE INPUT
+// 🔹 IVR MENU
+app.post('/ivr', (req, res) => {
+    console.log("📥 IVR MENU");
+
+    res.set('Content-Type', 'application/xml');
+
+    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+        '<Response>' +
+            '<GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
+                '<Say>Welcome to Chumz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent.</Say>' +
+            '</GetDigits>' +
+            '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+        '</Response>');
+});
+
+
+// 🔹 HANDLE INPUT
 app.post('/handle-input', async (req, res) => {
     console.log("📥 IVR input:", req.body);
 
@@ -75,43 +82,34 @@ app.post('/handle-input', async (req, res) => {
         }
     ]);
 
-    let response = '<?xml version="1.0" encoding="UTF-8"?>';
+    res.set('Content-Type', 'application/xml');
 
     if (digit === '1') {
-        response += `
-        <Response>
-            <Say>For login issues, please update the Chumz app and reset your PIN. Goodbye.</Say>
-        </Response>`;
+        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                '<Say>For login issues, please update the Chumz app and reset your PIN. Goodbye.</Say>' +
+            '</Response>');
     } 
     else if (digit === '2') {
-        response += `
-        <Response>
-            <Say>For deposit issues, please forward your M Pesa message to WhatsApp 0717134114. Goodbye.</Say>
-        </Response>`;
+        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                '<Say>For deposit issues, please forward your M Pesa message to WhatsApp 0717134114. Goodbye.</Say>' +
+            '</Response>');
     } 
     else if (digit === '3') {
-        response += `
-        <Response>
-            <Say>Connecting you to a support agent</Say>
-            <Dial phoneNumbers="+254717134114" record="true"/>
-        </Response>`;
-    } 
-    else if (digit === '9') {
-        response += `
-        <Response>
-            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
-        </Response>`;
+        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                '<Say>Connecting you to a support agent</Say>' +
+                '<Dial phoneNumbers="+254717134114" record="true"/>' +
+            '</Response>');
     } 
     else {
-        response += `
-        <Response>
-            <Say>Invalid input. Please try again.</Say>
-            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
-        </Response>`;
+        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                '<Say>Invalid input. Please try again.</Say>' +
+                '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+            '</Response>');
     }
-
-    res.set('Content-Type', 'application/xml');
-    res.send(response);
 });
 
 
