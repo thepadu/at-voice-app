@@ -15,6 +15,14 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
+// 🔧 CONFIG (clean + scalable)
+const AGENTS = [
+    "+254717134114",
+    "+254740323941"
+];
+
+const IVR_TIMEOUT = 7;
+
 // 🔧 Normalize phone
 function normalizePhone(phone) {
     if (!phone) return null;
@@ -36,10 +44,8 @@ app.get('/', (req, res) => {
 });
 
 
-// 🔹 ENTRY POINT (FAST)
+// 🔹 ENTRY (FAST)
 app.post('/voice', (req, res) => {
-    console.log("📥 ENTRY HIT");
-
     res.set('Content-Type', 'application/xml');
 
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
@@ -51,23 +57,25 @@ app.post('/voice', (req, res) => {
 
 // 🔹 IVR MENU
 app.post('/ivr', (req, res) => {
-    console.log("📥 IVR MENU");
-
     res.set('Content-Type', 'application/xml');
 
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
-            '<GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
-                '<Say>Welcome to Choomz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent. Press 9 to repeat this menu.</Say>' +
+
+            `<GetDigits timeout="${IVR_TIMEOUT}" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">` +
+                '<Say>Welcome to Chumz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent. Press 9 to repeat this menu.</Say>' +
             '</GetDigits>' +
+
+            // 👇 No input fallback
+            '<Say>No option was selected.</Say>' +
             '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+
         '</Response>');
 });
 
 
 // 🔹 HANDLE INPUT
 app.post('/handle-input', async (req, res) => {
-    console.log("📥 IVR input:", req.body);
 
     const digit = req.body.dtmfDigits || req.body.digits;
     const caller = normalizePhone(req.body.callerNumber);
@@ -84,38 +92,56 @@ app.post('/handle-input', async (req, res) => {
 
     res.set('Content-Type', 'application/xml');
 
+    // 🔹 OPTION 1
     if (digit === '1') {
-        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
-                '<Say>For login issues, please update the Choomz app and reset your PIN. Goodbye.</Say>' +
+                '<Say>For login issues, please update the Chumz app and reset your PIN. Goodbye.</Say>' +
             '</Response>');
-    } 
-    else if (digit === '2') {
-        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+    }
+
+    // 🔹 OPTION 2
+    if (digit === '2') {
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
                 '<Say>For deposit issues, please forward your M Pesa message to WhatsApp 0717134114. Goodbye.</Say>' +
             '</Response>');
-    } 
-    else if (digit === '3') {
-        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+    }
+
+    // 🔹 OPTION 3 → AGENT FLOW
+    if (digit === '3') {
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
-                '<Say>Connecting you to a support agent</Say>' +
-                '<Dial phoneNumbers="+254717134114" record="true"/>' +
+
+                '<Say>Please hold as your call is transferred to an available agent.</Say>' +
+
+                // First agent
+                `<Dial phoneNumbers="${AGENTS[0]}" timeout="15" record="true"/>` +
+
+                '<Say>The first agent did not pick. Proceeding to the next available agent.</Say>' +
+
+                // Second agent
+                `<Dial phoneNumbers="${AGENTS[1]}" timeout="15" record="true"/>` +
+
+                '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>' +
+
             '</Response>');
-    } 
-    else if (digit === '9') {
-        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+    }
+
+    // 🔹 OPTION 9 → REPEAT MENU
+    if (digit === '9') {
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
                 '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
             '</Response>');
     }
-    else {
-        res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-                '<Say>Invalid input. Please try again.</Say>' +
-                '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
-            '</Response>');
-    }
+
+    // 🔹 INVALID INPUT
+    return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+        '<Response>' +
+            '<Say>Invalid input. Please try again.</Say>' +
+            '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+        '</Response>');
 });
 
 
@@ -153,7 +179,7 @@ app.post('/events', async (req, res) => {
 });
 
 
-// Start server
+// Start
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
