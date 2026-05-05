@@ -36,19 +36,25 @@ app.get('/', (req, res) => {
 });
 
 
-// 🎯 VOICE ENTRY
+// 🎯 VOICE ENTRY (ROUTER)
 app.post('/voice', (req, res) => {
+    console.log("📥 Voice event:", req.body);
+
     const direction = req.body.direction;
 
     let response = '<?xml version="1.0" encoding="UTF-8"?>';
 
+    // 📞 OUTBOUND → CONNECT TO AGENT
     if (direction === 'outbound') {
         response += `
         <Response>
-            <Say>Please wait while we connect your call.</Say>
-            <Dial phoneNumbers="254717134114" record="true"/>
+            <Say>Please wait while we connect your call</Say>
+            <Dial phoneNumbers="+254717134114" record="true"/>
         </Response>`;
-    } else {
+    }
+
+    // ☎️ INBOUND → IVR MENU
+    else {
         response += `
         <Response>
             <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
@@ -60,17 +66,19 @@ app.post('/voice', (req, res) => {
                 Press 9 to repeat this menu.
                 </Say>
             </GetDigits>
-            <Redirect>https://at-voice-app.onrender.com/retry</Redirect>
+            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
         </Response>`;
     }
 
-    res.set('Content-Type', 'application/xml');
+    res.set('Content-Type', 'text/xml');
     res.send(response);
 });
 
 
-// 🎯 HANDLE INPUT
+// 🎯 HANDLE INPUT (IVR LOGIC)
 app.post('/handle-input', async (req, res) => {
+    console.log("📥 IVR input:", req.body);
+
     const digit = req.body.dtmfDigits || req.body.digits;
     const caller = normalizePhone(req.body.callerNumber);
     const sessionId = req.body.sessionId;
@@ -90,7 +98,7 @@ app.post('/handle-input', async (req, res) => {
         response += `
         <Response>
             <Say>Connecting you to a support agent</Say>
-            <Dial phoneNumbers="254717134114" record="true"/>
+            <Dial phoneNumbers="+254717134114" record="true"/>
         </Response>`;
     } else {
         response += `
@@ -99,7 +107,7 @@ app.post('/handle-input', async (req, res) => {
         </Response>`;
     }
 
-    res.set('Content-Type', 'application/xml');
+    res.set('Content-Type', 'text/xml');
     res.send(response);
 });
 
