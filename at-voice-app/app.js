@@ -58,7 +58,7 @@ app.post('/ivr', (req, res) => {
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
             '<GetDigits timeout="10" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">' +
-                '<Say>Welcome to Choumz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent.</Say>' +
+                '<Say>Welcome to Choomz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent.</Say>' +
             '</GetDigits>' +
             '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
         '</Response>');
@@ -87,7 +87,7 @@ app.post('/handle-input', async (req, res) => {
     if (digit === '1') {
         res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
-                '<Say>For login issues, please update the Choumz app and reset your PIN. Goodbye.</Say>' +
+                '<Say>For login issues, please update the Choomz app and reset your PIN. Goodbye.</Say>' +
             '</Response>');
     } 
     else if (digit === '2') {
