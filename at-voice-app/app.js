@@ -36,42 +36,23 @@ app.get('/', (req, res) => {
 });
 
 
-// 🎯 VOICE ENTRY (ROUTER)
+// 🎯 VOICE ENTRY (FAST + RELIABLE)
 app.post('/voice', (req, res) => {
-    console.log("📥 Voice event:", req.body);
-
-    const direction = req.body.direction;
-
-    let response = '<?xml version="1.0" encoding="UTF-8"?>';
-
-    // 📞 OUTBOUND → CONNECT TO AGENT
-    if (direction === 'outbound') {
-        response += `
-        <Response>
-            <Say>Please wait while we connect your call</Say>
-            <Dial phoneNumbers="+254717134114" record="true"/>
-        </Response>`;
-    }
-
-    // ☎️ INBOUND → IVR MENU
-    else {
-        response += `
-        <Response>
-            <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
-                <Say>
-                Welcome to Chumz customer support.
-                Press 1 for login issues.
-                Press 2 for deposit issues.
-                Press 3 to speak to a support agent.
-                Press 9 to repeat this menu.
-                </Say>
-            </GetDigits>
-            <Redirect>https://at-voice-app.onrender.com/voice</Redirect>
-        </Response>`;
-    }
+    console.log("📥 INBOUND CALL HIT");
 
     res.set('Content-Type', 'text/xml');
-    res.send(response);
+
+    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>Welcome to Chumz customer support</Say>
+    <GetDigits timeout="10" numDigits="1" finishOnKey="#" callbackUrl="https://at-voice-app.onrender.com/handle-input">
+        <Say>
+        Press 1 for login issues.
+        Press 2 for deposit issues.
+        Press 3 to speak to a support agent.
+        </Say>
+    </GetDigits>
+</Response>`);
 });
 
 
