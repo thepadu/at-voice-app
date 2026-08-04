@@ -1,4 +1,4 @@
-module.exports = function(app, supabase) {
+module.exports = function(app, supabase, requireAuth) {
 
     const TICKET_STATUSES = ['open', 'in_progress', 'resolved'];
 
@@ -40,7 +40,7 @@ module.exports = function(app, supabase) {
     }
 
     // 📊 DASHBOARD
-    app.get('/dashboard', async (req, res) => {
+    app.get('/dashboard', requireAuth, async (req, res) => {
         const { from, to, option, status, ticket, caller } = req.query;
 
         let query = supabase
@@ -336,7 +336,11 @@ module.exports = function(app, supabase) {
 
             <div class="header">
                 <h2>💚 Chumz Support Dashboard</h2>
-                <a href="/export" class="export-btn">⬇ Export</a>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <span style="font-size:13px;opacity:0.85;">${escapeHtml(req.user.email)}</span>
+                    <a href="/export" class="export-btn">⬇ Export</a>
+                    <a href="/logout" class="export-btn">Logout</a>
+                </div>
             </div>
 
             <div class="container">
@@ -489,7 +493,7 @@ module.exports = function(app, supabase) {
     });
 
     // 📥 EXPORT
-    app.get('/export', async (req, res) => {
+    app.get('/export', requireAuth, async (req, res) => {
         const { data } = await supabase.from('call_logs').select('*');
 
         let csv = 'Caller,Issue,Status,Duration,Time,Ticket\n';

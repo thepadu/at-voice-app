@@ -1,7 +1,11 @@
 const express = require('express');
 const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser');
+const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
+const authRoutes = require('./auth');
+const apiRoutes = require('./api');
 const dashboardRoutes = require('./dashboard');
 const outboundRoutes = require('./outbound');
 
@@ -9,11 +13,14 @@ const app = express();
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+app.use(cookieParser());
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_KEY
 );
+
+const requireAuth = authRoutes(app);
 
 // 🔧 CONFIG
 const AGENTS = [
@@ -35,8 +42,9 @@ function normalizePhone(phone) {
 app.locals.normalizePhone = normalizePhone;
 
 // Routes
-dashboardRoutes(app, supabase);
-outboundRoutes(app);
+apiRoutes(app, supabase, requireAuth);
+dashboardRoutes(app, supabase, requireAuth);
+outboundRoutes(app, requireAuth);
 
 // Health
 app.get('/', (req, res) => {
@@ -189,7 +197,7 @@ app.post('/events', async (req, res) => {
 
 
 // 🔹 TICKET STATUS UPDATE
-app.post('/ticket/:sessionId', async (req, res) => {
+app.post('/ticket/:sessionId', requireAuth, async (req, res) => {
     const { sessionId } = req.params;
     const { ticket_status } = req.body;
 
@@ -210,6 +218,18 @@ app.post('/ticket/:sessionId', async (req, res) => {
     res.sendStatus(200);
 });
 
+
+// 🔹 REACT WEB APP (built via `npm run build` in /web, served under /app)
+// dashboard.js keeps serving the old HTML pages at '/' and '/dashboard' —
+// this lives at a separate path rather than replacing them outright, so
+// nothing breaks if the React app isn't built yet on a given deploy.
+const webBuildPath = path.join(__dirname, '..', 'web', 'dist');
+app.use('/app', express.static(webBuildPath));
+app.get(['/app', '/app/*'], (req, res) => {
+    res.sendFile(path.join(webBuildPath, 'index.html'), err => {
+        if (err) res.status(404).send('Web app not built — run `npm run build` in /web first.');
+    });
+});
 
 // Start server
 const PORT = process.env.PORT || 3000;

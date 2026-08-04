@@ -1,0 +1,188 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #F5F7FB;
+    color: #1F2937;
+}
+
+.app-header {
+    background: #0F9D58;
+    color: white;
+    padding: 16px 30px;
+    display: flex;
+    align-items: center;
+    gap: 30px;
+}
+
+.app-header h1 {
+    font-size: 20px;
+    margin: 0;
+}
+
+.app-header nav {
+    display: flex;
+    gap: 18px;
+    flex: 1;
+}
+
+.app-header nav a {
+    color: white;
+    text-decoration: none;
+    opacity: 0.85;
+    font-weight: 600;
+    padding-bottom: 4px;
+}
+
+.app-header nav a.active,
+.app-header nav a:hover {
+    opacity: 1;
+    border-bottom: 2px solid white;
+}
+
+.app-header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 13px;
+}
+
+.user-email {
+    opacity: 0.9;
+}
+
+.logout-link {
+    background: white;
+    color: #0F9D58;
+    padding: 6px 12px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.app-main {
+    padding: 25px;
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.card {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-left: 5px solid #0F9D58;
+}
+
+.card p {
+    font-size: 24px;
+    font-weight: bold;
+    color: #0F9D58;
+    margin: 0 0 4px;
+}
+
+.panel {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.panel h3 {
+    margin-top: 0;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+th, td {
+    padding: 12px 14px;
+    text-align: left;
+}
+
+th {
+    background: #0F9D58;
+    color: white;
+}
+
+tr:nth-child(even) {
+    background: #F9FAFB;
+}
+
+.live-row {
+    animation: pulse-row 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse-row {
+    0%, 100% { background: #FFFFFF; }
+    50% { background: #EFF6FF; }
+}
+
+.empty {
+    text-align: center;
+    color: #6B7280;
+    padding: 16px;
+}
+
+.tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.tab {
+    background: white;
+    border: 1px solid #D1D5DB;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.tab.active {
+    background: #0F9D58;
+    color: white;
+    border-color: #0F9D58;
+}
+
+.dialer-row {
+    display: flex;
+    gap: 10px;
+}
+
+.dialer-row input {
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    flex: 1;
+    max-width: 260px;
+}
+
+.dialer-row button {
+    background: #0F9D58;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.error {
+    color: #EF4444;
+}

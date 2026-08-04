@@ -1,6 +1,6 @@
 const AfricasTalking = require('africastalking');
 
-module.exports = function (app) {
+module.exports = function (app, requireAuth) {
 
     const africastalking = AfricasTalking({
         apiKey: process.env.AT_API_KEY,
@@ -31,7 +31,7 @@ module.exports = function (app) {
     }
 
     // 📞 CALL ROUTE (GET + POST supported)
-    app.all('/call', async (req, res) => {
+    app.all('/call', requireAuth, async (req, res) => {
         console.log("🔥 /call route hit");
 
         let phone = req.body.phone || req.query.phone;
