@@ -22,13 +22,40 @@ const supabase = createClient(
 
 const requireAuth = authRoutes(app);
 
-// 🔧 CONFIG
-const AGENTS = [
-    "+254717134114",
-    "+254740323941"
-];
-
 const IVR_TIMEOUT = 7;
+
+// 🔧 IVR menu + agent list are dashboard-editable (see api.js) — stored in
+// Supabase's `ivr_options` and `agents` tables (migrations/003) instead of
+// hardcoded here, so changing a prompt or adding/removing an agent doesn't
+// need a code deploy.
+async function getIvrOptions() {
+    const { data, error } = await supabase
+        .from('ivr_options')
+        .select('*')
+        .order('digit', { ascending: true });
+
+    if (error) {
+        console.error('❌ Failed to load ivr_options:', error);
+        return [];
+    }
+
+    return data;
+}
+
+async function getAvailableAgents() {
+    const { data, error } = await supabase
+        .from('agents')
+        .select('*')
+        .eq('status', 'available')
+        .order('id', { ascending: true });
+
+    if (error) {
+        console.error('❌ Failed to load agents:', error);
+        return [];
+    }
+
+    return data;
+}
 
 // 🔧 Normalize phone
 function normalizePhone(phone) {
@@ -63,6 +90,19 @@ app.post('/voice', (req, res) => {
 });
 
 
+// XML-escape dynamic text before embedding it in a voice response — the IVR
+// menu text and agent list are now dashboard-editable (by any authenticated
+// @chumz.io user), so an admin typing "Terms & Conditions" shouldn't produce
+// invalid XML.
+function escapeXml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
 // 🔹 IVR MENU + LOG ENTRY
 app.post('/ivr', async (req, res) => {
 
@@ -76,13 +116,20 @@ app.post('/ivr', async (req, res) => {
         status: 'ivr_started'
     }, { onConflict: 'session_id' });
 
+    const options = await getIvrOptions();
+
+    const menuText = options.length
+        ? 'Welcome to choomz customer support. ' +
+          options.map(o => `Press ${o.digit} for ${escapeXml(o.label)}.`).join(' ')
+        : 'Welcome to choomz customer support. Our menu is temporarily unavailable, please try again shortly.';
+
     res.set('Content-Type', 'application/xml');
 
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
 
             `<GetDigits timeout="${IVR_TIMEOUT}" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">` +
-                '<Say>Welcome to choomz customer support. Press 1 for login issues. Press 2 for deposit issues. Press 3 to speak to a support agent. Press 9 to repeat this menu.</Say>' +
+                `<Say>${menuText}</Say>` +
             '</GetDigits>' +
 
             '<Say>No option was selected.</Say>' +
@@ -109,48 +156,52 @@ app.post('/handle-input', async (req, res) => {
 
     res.set('Content-Type', 'application/xml');
 
-    if (digit === '1') {
+    const options = await getIvrOptions();
+    const option = options.find(o => o.digit === digit);
+
+    if (!option) {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
-                '<Say>For login issues, please update the choomz app and reset your PIN. Goodbye.</Say>' +
+                '<Say>Invalid input. Please try again.</Say>' +
+                '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
             '</Response>');
     }
 
-    if (digit === '2') {
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-                '<Say>For deposit issues, please forward your M Pesa message to WhatsApp 0717134114. Goodbye.</Say>' +
-            '</Response>');
-    }
-
-    if (digit === '3') {
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-
-                '<Say>Please hold as your call is transferred to an available agent.</Say>' +
-
-                `<Dial phoneNumbers="${AGENTS[0]}" timeout="15" record="true"/>` +
-
-                '<Say>The first agent did not pick. Proceeding to the next available agent.</Say>' +
-
-                `<Dial phoneNumbers="${AGENTS[1]}" timeout="15" record="true"/>` +
-
-                '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>' +
-
-            '</Response>');
-    }
-
-    if (digit === '9') {
+    if (option.action === 'repeat_menu') {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
                 '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
             '</Response>');
     }
 
+    if (option.action === 'transfer_agent') {
+        const agents = await getAvailableAgents();
+
+        if (agents.length === 0) {
+            return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+                '<Response>' +
+                    '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>' +
+                '</Response>');
+        }
+
+        let body = `<Say>${escapeXml(option.response_message)}</Say>`;
+
+        agents.forEach((agent, i) => {
+            body += `<Dial phoneNumbers="${escapeXml(agent.phone)}" timeout="15" record="true"/>`;
+            if (i < agents.length - 1) {
+                body += '<Say>That agent did not pick up. Proceeding to the next available agent.</Say>';
+            }
+        });
+
+        body += '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>';
+
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' + '<Response>' + body + '</Response>');
+    }
+
+    // action === 'message'
     return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
-            '<Say>Invalid input. Please try again.</Say>' +
-            '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+            `<Say>${escapeXml(option.response_message)}</Say>` +
         '</Response>');
 });
 
@@ -181,7 +232,9 @@ app.post('/events', async (req, res) => {
     // with agent_number so the dashboard can compute per-agent stats.
     // NOTE: field name/behavior assumed from AT's docs — confirm against the
     // "📡 EVENT" log on a live agent-transfer call before relying on this.
-    const isAgentLeg = AGENTS.map(normalizePhone).includes(destination);
+    const { data: allAgents } = await supabase.from('agents').select('phone');
+    const agentPhones = (allAgents || []).map(a => normalizePhone(a.phone));
+    const isAgentLeg = agentPhones.includes(destination);
 
     await supabase.from('call_logs').upsert({
         session_id: sessionId,

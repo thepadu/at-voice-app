@@ -41,4 +41,4 @@ Outputs to `web/dist`, which `at-voice-app/app.js` serves at `/app` (e.g. `https
 
 ## What's here vs. not
 
-Built: Dashboard (summary + live calls), Calls (tabbed list + ticket status), Dialer, Agents (performance stats). Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent straight to the existing `/login` HTML page rather than a React equivalent), any of the deferred roadmap items in `SYSTEM_DESIGN.md` (agent/IVR management, analytics charts, archiving, call transfer).
+Built: Dashboard (summary + live calls), Calls (tabbed list + ticket status), Dialer, Agents (team management + presence toggle + performance stats), IVR editor (edit/add/remove menu options, wired live to the actual call flow). Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent straight to the existing `/login` HTML page rather than a React equivalent), or any of the remaining deferred roadmap items in `SYSTEM_DESIGN.md` (analytics charts, archiving, call transfer, role-based permissions).

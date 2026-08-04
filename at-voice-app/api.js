@@ -1,7 +1,7 @@
-// JSON API for the React Native app. Mirrors the data shown on the HTML
-// dashboard (dashboard.js) but as JSON instead of rendered markup — the two
-// intentionally overlap in what they query rather than sharing code, since
-// dashboard.js is stable/working and this is new surface area.
+// JSON API for the React web app (/web). Mirrors the data shown on the old
+// HTML dashboard (dashboard.js) but as JSON instead of rendered markup — the
+// two intentionally overlap in what they query rather than sharing code,
+// since dashboard.js is stable/working and this is new surface area.
 module.exports = function (app, supabase, requireAuth) {
 
     // A row is a pure agent-leg record (see dashboard.js) — exclude it from
@@ -139,6 +139,185 @@ module.exports = function (app, supabase, requireAuth) {
         if (error) {
             console.error(error);
             return res.status(500).json({ error: 'Failed to update ticket' });
+        }
+
+        res.json({ ok: true });
+    });
+
+    // ── Agents ──────────────────────────────────────────────────────────
+    // Anyone with dashboard access can manage agents/IVR for now — there's
+    // no separate admin role yet (same as every other route on this app).
+
+    const isValidPhone = phone => /^\+254\d{9}$/.test(phone || '');
+
+    app.get('/api/agents', requireAuth, async (req, res) => {
+        const { data, error } = await supabase.from('agents').select('*').order('id', { ascending: true });
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load agents' });
+        }
+
+        res.json({ agents: data });
+    });
+
+    app.post('/api/agents', requireAuth, async (req, res) => {
+        const { name, phone, email } = req.body;
+
+        if (!name || !isValidPhone(phone)) {
+            return res.status(400).json({ error: 'Name and a valid +254 phone number are required' });
+        }
+
+        const { data, error } = await supabase
+            .from('agents')
+            .insert({ name, phone, email: email || null, status: 'offline' })
+            .select()
+            .single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to create agent' });
+        }
+
+        res.status(201).json({ agent: data });
+    });
+
+    app.patch('/api/agents/:id', requireAuth, async (req, res) => {
+        const { id } = req.params;
+        const { name, phone, email, status } = req.body;
+
+        if (phone !== undefined && !isValidPhone(phone)) {
+            return res.status(400).json({ error: 'Invalid phone number' });
+        }
+
+        if (status !== undefined && !['available', 'offline'].includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        const updates = {};
+        if (name !== undefined) updates.name = name;
+        if (phone !== undefined) updates.phone = phone;
+        if (email !== undefined) updates.email = email || null;
+        if (status !== undefined) updates.status = status;
+
+        const { data, error } = await supabase.from('agents').update(updates).eq('id', id).select().single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to update agent' });
+        }
+
+        res.json({ agent: data });
+    });
+
+    app.delete('/api/agents/:id', requireAuth, async (req, res) => {
+        const { error } = await supabase.from('agents').delete().eq('id', req.params.id);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to delete agent' });
+        }
+
+        res.json({ ok: true });
+    });
+
+    // Lets an agent flip their own presence without knowing their agent id —
+    // only works if their agents.email matches their Google login. Agents
+    // seeded without a matching email (see migrations/003) need an admin to
+    // toggle their status via PATCH /api/agents/:id instead, until someone
+    // sets their email from the Agents page.
+    app.patch('/api/agents/me/status', requireAuth, async (req, res) => {
+        const { status } = req.body;
+
+        if (!['available', 'offline'].includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        const { data, error } = await supabase
+            .from('agents')
+            .update({ status })
+            .eq('email', req.user.email)
+            .select()
+            .single();
+
+        if (error || !data) {
+            return res.status(404).json({ error: 'No agent record linked to your account yet' });
+        }
+
+        res.json({ agent: data });
+    });
+
+    // ── IVR menu options ───────────────────────────────────────────────
+
+    app.get('/api/ivr-options', requireAuth, async (req, res) => {
+        const { data, error } = await supabase.from('ivr_options').select('*').order('digit', { ascending: true });
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load IVR options' });
+        }
+
+        res.json({ options: data });
+    });
+
+    app.post('/api/ivr-options', requireAuth, async (req, res) => {
+        const { digit, label, response_message, action } = req.body;
+
+        if (!/^[0-9*#]$/.test(digit || '')) {
+            return res.status(400).json({ error: 'digit must be a single key (0-9, *, #)' });
+        }
+
+        if (!label || !['message', 'transfer_agent', 'repeat_menu'].includes(action)) {
+            return res.status(400).json({ error: 'label and a valid action are required' });
+        }
+
+        const { data, error } = await supabase
+            .from('ivr_options')
+            .insert({ digit, label, response_message: response_message || null, action })
+            .select()
+            .single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to create IVR option (digit may already exist)' });
+        }
+
+        res.status(201).json({ option: data });
+    });
+
+    app.patch('/api/ivr-options/:digit', requireAuth, async (req, res) => {
+        const { label, response_message, action } = req.body;
+
+        if (action !== undefined && !['message', 'transfer_agent', 'repeat_menu'].includes(action)) {
+            return res.status(400).json({ error: 'Invalid action' });
+        }
+
+        const updates = { updated_at: new Date().toISOString() };
+        if (label !== undefined) updates.label = label;
+        if (response_message !== undefined) updates.response_message = response_message;
+        if (action !== undefined) updates.action = action;
+
+        const { data, error } = await supabase
+            .from('ivr_options')
+            .update(updates)
+            .eq('digit', req.params.digit)
+            .select()
+            .single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to update IVR option' });
+        }
+
+        res.json({ option: data });
+    });
+
+    app.delete('/api/ivr-options/:digit', requireAuth, async (req, res) => {
+        const { error } = await supabase.from('ivr_options').delete().eq('digit', req.params.digit);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to delete IVR option' });
         }
 
         res.json({ ok: true });

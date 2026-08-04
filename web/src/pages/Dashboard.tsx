@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import StatusPill from '../components/StatusPill';
 
 type Call = {
     session_id: string;
@@ -51,7 +52,7 @@ export default function Dashboard() {
                             {live.map(call => (
                                 <tr key={call.session_id} className="live-row">
                                     <td>{call.caller}</td>
-                                    <td>{call.status}</td>
+                                    <td><StatusPill value={call.status ?? 'unknown'} /></td>
                                     <td>{new Date(call.created_at).toLocaleTimeString()}</td>
                                 </tr>
                             ))}

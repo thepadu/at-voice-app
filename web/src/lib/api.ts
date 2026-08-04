@@ -24,7 +24,14 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
 
     if (!res.ok) {
         const body = await res.text();
-        throw new ApiError(res.status, body || 'Request failed');
+        let message = body || 'Request failed';
+        try {
+            const parsed = JSON.parse(body);
+            if (parsed?.error) message = parsed.error;
+        } catch {
+            // Not JSON (e.g. /call's plain-text error responses) — use the raw body.
+        }
+        throw new ApiError(res.status, message);
     }
 
     // /call (outbound.js) responds with plain text, not JSON — everything

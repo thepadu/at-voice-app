@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { useToast } from '../lib/toast';
 
 // Same normalization/validation rules as the old HTML dashboard's dialer
 // (dashboard.js) — kept identical so behavior doesn't change for agents.
@@ -17,24 +18,28 @@ function isValid(phone: string) {
 export default function Dialer() {
     const [input, setInput] = useState('');
     const [error, setError] = useState('');
-    const [status, setStatus] = useState('');
+    const [calling, setCalling] = useState(false);
+    const showToast = useToast();
 
     async function makeCall() {
         const phone = formatPhone(input);
 
         if (!isValid(phone)) {
             setError('Enter a valid Kenyan number');
-            setStatus('');
             return;
         }
 
         setError('');
+        setCalling(true);
 
         try {
             await apiFetch('/call', { method: 'POST', body: JSON.stringify({ phone }) });
-            setStatus(`📞 Calling ${phone}`);
-        } catch {
-            setStatus('Call failed');
+            showToast(`📞 Calling ${phone}`);
+            setInput('');
+        } catch (err: any) {
+            showToast(err.message || 'Call failed', 'error');
+        } finally {
+            setCalling(false);
         }
     }
 
@@ -45,12 +50,15 @@ export default function Dialer() {
                 <input
                     value={input}
                     onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && makeCall()}
                     placeholder="0712345678"
+                    disabled={calling}
                 />
-                <button onClick={makeCall}>Call</button>
+                <button className="btn btn-primary" onClick={makeCall} disabled={calling}>
+                    {calling ? 'Calling…' : 'Call'}
+                </button>
             </div>
             {error && <p className="error">{error}</p>}
-            {status && <p className="status">{status}</p>}
         </div>
     );
 }

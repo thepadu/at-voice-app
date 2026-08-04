@@ -1,10 +1,12 @@
 import { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth';
+import { ToastProvider } from './lib/toast';
 import Dashboard from './pages/Dashboard';
 import Calls from './pages/Calls';
 import Dialer from './pages/Dialer';
 import Agents from './pages/Agents';
+import IvrEditor from './pages/IvrEditor';
 
 function Layout({ children }: { children: ReactNode }) {
     const { user, loading } = useAuth();
@@ -18,6 +20,7 @@ function Layout({ children }: { children: ReactNode }) {
                     <NavLink to="/calls">Calls</NavLink>
                     <NavLink to="/dialer">Dialer</NavLink>
                     <NavLink to="/agents">Agents</NavLink>
+                    <NavLink to="/ivr">IVR</NavLink>
                 </nav>
                 <div className="app-header-right">
                     {!loading && user && <span className="user-email">{user.email}</span>}
@@ -31,17 +34,20 @@ function Layout({ children }: { children: ReactNode }) {
 
 export default function App() {
     return (
-        <AuthProvider>
-            <BrowserRouter basename="/app">
-                <Layout>
-                    <Routes>
-                        <Route path="/" element={<Dashboard />} />
-                        <Route path="/calls" element={<Calls />} />
-                        <Route path="/dialer" element={<Dialer />} />
-                        <Route path="/agents" element={<Agents />} />
-                    </Routes>
-                </Layout>
-            </BrowserRouter>
-        </AuthProvider>
+        <ToastProvider>
+            <AuthProvider>
+                <BrowserRouter basename="/app">
+                    <Layout>
+                        <Routes>
+                            <Route path="/" element={<Dashboard />} />
+                            <Route path="/calls" element={<Calls />} />
+                            <Route path="/dialer" element={<Dialer />} />
+                            <Route path="/agents" element={<Agents />} />
+                            <Route path="/ivr" element={<IvrEditor />} />
+                        </Routes>
+                    </Layout>
+                </BrowserRouter>
+            </AuthProvider>
+        </ToastProvider>
     );
 }

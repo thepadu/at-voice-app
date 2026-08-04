@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import StatusPill from '../components/StatusPill';
 
 type Call = {
     session_id: string;
@@ -72,7 +73,7 @@ export default function Calls() {
                         <tr key={call.session_id} className={call.status === 'ongoing' ? 'live-row' : ''}>
                             <td>{call.caller}</td>
                             <td>{call.option_pressed ? OPTION_LABELS[call.option_pressed] ?? call.option_pressed : '—'}</td>
-                            <td>{call.status ?? 'Unknown'}</td>
+                            <td><StatusPill value={call.status ?? 'unknown'} /></td>
                             <td>{call.duration ?? 0}s</td>
                             <td>{new Date(call.created_at).toLocaleString()}</td>
                             <td>
