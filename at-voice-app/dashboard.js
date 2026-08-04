@@ -1,11 +1,22 @@
 module.exports = function(app, supabase) {
 
+    const TICKET_STATUSES = ['open', 'in_progress', 'resolved'];
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function formatOption(option) {
         if (option === '1') return { label: 'Login Issue', color: '#2563EB' };
         if (option === '2') return { label: 'Deposit Issue', color: '#F59E0B' };
         if (option === '3') return { label: 'Agent Request', color: '#10B981' };
         if (option === '9') return { label: 'Repeat Menu', color: '#6B7280' };
-        return { label: option, color: '#6B7280' };
+        return { label: option || '—', color: '#6B7280' };
     }
 
     function formatStatus(status) {
@@ -15,36 +26,92 @@ module.exports = function(app, supabase) {
         return { label: status || 'Unknown', color: '#6B7280' };
     }
 
+    function formatTicket(status) {
+        if (status === 'in_progress') return { label: 'In Progress', color: '#F59E0B' };
+        if (status === 'resolved') return { label: 'Resolved', color: '#10B981' };
+        return { label: 'Open', color: '#EF4444' };
+    }
+
+    // A row is a pure agent-leg record (created from the /events callback for
+    // the Dial to a support agent) if it carries an agent_number but never
+    // went through the IVR menu. Those feed agent stats, not the call list.
+    function isAgentLegRow(row) {
+        return !!row.agent_number && !row.option_pressed;
+    }
+
     // 📊 DASHBOARD
     app.get('/dashboard', async (req, res) => {
-        const { data, error } = await supabase
+        const { from, to, option, status, ticket, caller } = req.query;
+
+        let query = supabase
             .from('call_logs')
             .select('*')
             .order('created_at', { ascending: false })
-            .limit(100);
+            .limit(200);
+
+        if (from) query = query.gte('created_at', `${from}T00:00:00`);
+        if (to) query = query.lte('created_at', `${to}T23:59:59`);
+        if (option) query = query.eq('option_pressed', option);
+        if (status) query = query.eq('status', status);
+        if (ticket) query = query.eq('ticket_status', ticket);
+        if (caller) query = query.ilike('caller', `%${caller}%`);
+
+        const { data, error } = await query;
 
         if (error) {
             console.error(error);
             return res.send('Error loading dashboard');
         }
 
-        const total = data.length;
-        const login = data.filter(d => d.option_pressed === '1').length;
-        const deposit = data.filter(d => d.option_pressed === '2').length;
-        const agent = data.filter(d => d.option_pressed === '3').length;
+        const rowsData = data.filter(row => !isAgentLegRow(row));
+
+        const { data: agentData, error: agentError } = await supabase
+            .from('call_logs')
+            .select('agent_number, status, duration')
+            .not('agent_number', 'is', null);
+
+        if (agentError) console.error(agentError);
+
+        const agentStats = {};
+        (agentData || []).forEach(row => {
+            const key = row.agent_number;
+            if (!agentStats[key]) {
+                agentStats[key] = { agent: key, total: 0, answered: 0, missed: 0, durationSum: 0 };
+            }
+            const stat = agentStats[key];
+            stat.total++;
+            if (row.status === 'completed') {
+                stat.answered++;
+                stat.durationSum += row.duration || 0;
+            } else if (row.status === 'failed' || row.status === 'unknown') {
+                stat.missed++;
+            }
+        });
+
+        const agentRows = Object.values(agentStats).map(stat => ({
+            ...stat,
+            avgHandleTime: stat.answered ? Math.round(stat.durationSum / stat.answered) : 0
+        }));
+
+        const total = rowsData.length;
+        const login = rowsData.filter(d => d.option_pressed === '1').length;
+        const deposit = rowsData.filter(d => d.option_pressed === '2').length;
+        const agent = rowsData.filter(d => d.option_pressed === '3').length;
 
         let rows = '';
 
-        data.forEach(row => {
-            const option = formatOption(row.option_pressed);
-            const status = formatStatus(row.status);
+        rowsData.forEach(row => {
+            const optionFmt = formatOption(row.option_pressed);
+            const statusFmt = formatStatus(row.status);
+            const ticketFmt = formatTicket(row.ticket_status);
+            const isLive = row.status === 'ongoing';
 
             rows += `
-            <tr>
+            <tr class="${isLive ? 'live-row' : ''}">
                 <td>
-                    ${row.caller}
+                    ${escapeHtml(row.caller)}
                     <form method="POST" action="/call" style="display:inline;">
-                        <input type="hidden" name="phone" value="${row.caller}">
+                        <input type="hidden" name="phone" value="${escapeHtml(row.caller)}">
                         <button style="
                             margin-left:8px;
                             background:#0F9D58;
@@ -57,20 +124,54 @@ module.exports = function(app, supabase) {
                     </form>
                 </td>
                 <td>
-                    <span class="badge" style="background:${option.color}">
-                        ${option.label}
+                    <span class="badge" style="background:${optionFmt.color}">
+                        ${optionFmt.label}
                     </span>
                 </td>
                 <td>
-                    <span class="badge" style="background:${status.color}">
-                        ${status.label}
+                    <span class="badge" style="background:${statusFmt.color}">
+                        ${isLive ? '🔴 ' : ''}${statusFmt.label}
                     </span>
                 </td>
                 <td>${row.duration || 0}s</td>
                 <td>${new Date(row.created_at).toLocaleString()}</td>
+                <td>
+                    <select
+                        class="ticket-select"
+                        style="background:${ticketFmt.color};"
+                        onchange="updateTicket('${escapeHtml(row.session_id)}', this.value)"
+                    >
+                        ${TICKET_STATUSES.map(s => `
+                            <option value="${s}" ${row.ticket_status === s || (!row.ticket_status && s === 'open') ? 'selected' : ''}>
+                                ${formatTicket(s).label}
+                            </option>
+                        `).join('')}
+                    </select>
+                </td>
             </tr>
             `;
         });
+
+        let agentRowsHtml = '';
+        agentRows.forEach(stat => {
+            agentRowsHtml += `
+            <tr>
+                <td>${escapeHtml(stat.agent)}</td>
+                <td>${stat.total}</td>
+                <td>${stat.answered}</td>
+                <td>${stat.missed}</td>
+                <td>${stat.avgHandleTime}s</td>
+            </tr>
+            `;
+        });
+
+        if (!agentRowsHtml) {
+            agentRowsHtml = '<tr><td colspan="5" style="text-align:center;color:#6B7280;">No agent call data yet</td></tr>';
+        }
+
+        const optionSelected = v => option === v ? 'selected' : '';
+        const statusSelected = v => status === v ? 'selected' : '';
+        const ticketSelected = v => ticket === v ? 'selected' : '';
 
         const html = `
         <html>
@@ -164,12 +265,69 @@ module.exports = function(app, supabase) {
                     font-size: 12px;
                 }
 
-                .dialer {
+                .ticket-select {
+                    color: white;
+                    border: none;
+                    padding: 6px 10px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    cursor: pointer;
+                }
+
+                .dialer, .filters, .panel {
                     background:white;
                     padding:20px;
                     border-radius:12px;
                     margin-bottom:20px;
                     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                }
+
+                .filters form {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                    align-items: flex-end;
+                }
+
+                .filters label {
+                    display: block;
+                    font-size: 12px;
+                    color: #6B7280;
+                    margin-bottom: 4px;
+                }
+
+                .filters input, .filters select {
+                    padding: 8px;
+                    border-radius: 8px;
+                    border: 1px solid #ccc;
+                }
+
+                .filters .apply-btn {
+                    background:#0F9D58;
+                    color:white;
+                    border:none;
+                    padding:9px 15px;
+                    border-radius:8px;
+                    cursor:pointer;
+                }
+
+                .filters .clear-link {
+                    color: #6B7280;
+                    font-size: 13px;
+                    align-self: center;
+                }
+
+                .panel h3 {
+                    margin-top: 0;
+                }
+
+                .live-row {
+                    animation: pulse-row 1.6s ease-in-out infinite;
+                }
+
+                @keyframes pulse-row {
+                    0%, 100% { background: #FFFFFF; }
+                    50% { background: #EFF6FF; }
                 }
             </style>
         </head>
@@ -193,6 +351,57 @@ module.exports = function(app, supabase) {
                     <p id="dialerError" style="color:red;"></p>
                 </div>
 
+                <!-- 🔍 FILTERS -->
+                <div class="filters">
+                    <h3 style="margin-top:0;">🔍 Filters</h3>
+                    <form method="GET" action="/dashboard">
+                        <div>
+                            <label>From</label>
+                            <input type="date" name="from" value="${escapeHtml(from)}">
+                        </div>
+                        <div>
+                            <label>To</label>
+                            <input type="date" name="to" value="${escapeHtml(to)}">
+                        </div>
+                        <div>
+                            <label>Issue</label>
+                            <select name="option">
+                                <option value="">All</option>
+                                <option value="1" ${optionSelected('1')}>Login Issue</option>
+                                <option value="2" ${optionSelected('2')}>Deposit Issue</option>
+                                <option value="3" ${optionSelected('3')}>Agent Request</option>
+                                <option value="9" ${optionSelected('9')}>Repeat Menu</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Call Status</label>
+                            <select name="status">
+                                <option value="">All</option>
+                                <option value="ivr_started" ${statusSelected('ivr_started')}>IVR Started</option>
+                                <option value="input_received" ${statusSelected('input_received')}>Input Received</option>
+                                <option value="ongoing" ${statusSelected('ongoing')}>Ongoing</option>
+                                <option value="completed" ${statusSelected('completed')}>Completed</option>
+                                <option value="failed" ${statusSelected('failed')}>Failed</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Ticket</label>
+                            <select name="ticket">
+                                <option value="">All</option>
+                                <option value="open" ${ticketSelected('open')}>Open</option>
+                                <option value="in_progress" ${ticketSelected('in_progress')}>In Progress</option>
+                                <option value="resolved" ${ticketSelected('resolved')}>Resolved</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Caller</label>
+                            <input type="text" name="caller" placeholder="254712..." value="${escapeHtml(caller)}">
+                        </div>
+                        <button type="submit" class="apply-btn">Apply</button>
+                        <a href="/dashboard" class="clear-link">Clear</a>
+                    </form>
+                </div>
+
                 <div class="cards">
                     <div class="card"><p>${total}</p>Total Calls</div>
                     <div class="card"><p>${login}</p>Login Issues</div>
@@ -207,9 +416,25 @@ module.exports = function(app, supabase) {
                         <th>Status</th>
                         <th>Duration</th>
                         <th>Time</th>
+                        <th>Ticket</th>
                     </tr>
                     ${rows}
                 </table>
+
+                <!-- 👤 AGENT PERFORMANCE -->
+                <div class="panel" style="margin-top:25px;">
+                    <h3>👤 Agent Performance</h3>
+                    <table>
+                        <tr>
+                            <th>Agent</th>
+                            <th>Total Calls</th>
+                            <th>Answered</th>
+                            <th>Missed</th>
+                            <th>Avg Handle Time</th>
+                        </tr>
+                        ${agentRowsHtml}
+                    </table>
+                </div>
 
             </div>
 
@@ -246,6 +471,14 @@ module.exports = function(app, supabase) {
 
                     alert("📞 Calling " + phone);
                 }
+
+                function updateTicket(sessionId, ticketStatus) {
+                    fetch('/ticket/' + encodeURIComponent(sessionId), {
+                        method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ ticket_status: ticketStatus })
+                    }).catch(err => console.error(err));
+                }
             </script>
 
         </body>
@@ -259,10 +492,10 @@ module.exports = function(app, supabase) {
     app.get('/export', async (req, res) => {
         const { data } = await supabase.from('call_logs').select('*');
 
-        let csv = 'Caller,Issue,Status,Duration,Time\n';
+        let csv = 'Caller,Issue,Status,Duration,Time,Ticket\n';
 
         data.forEach(row => {
-            csv += `${row.caller},${row.option_pressed},${row.status || ''},${row.duration || 0},${row.created_at}\n`;
+            csv += `${row.caller},${row.option_pressed},${row.status || ''},${row.duration || 0},${row.created_at},${row.ticket_status || 'open'}\n`;
         });
 
         res.header('Content-Type', 'text/csv');

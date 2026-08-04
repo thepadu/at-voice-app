@@ -156,10 +156,12 @@ app.post('/events', async (req, res) => {
         isActive,
         durationInSeconds,
         direction,
-        callerNumber
+        callerNumber,
+        destinationNumber
     } = req.body;
 
     const caller = normalizePhone(callerNumber);
+    const destination = normalizePhone(destinationNumber);
 
     let status = 'unknown';
 
@@ -167,13 +169,43 @@ app.post('/events', async (req, res) => {
     if (isActive === '0' && durationInSeconds > 0) status = 'completed';
     if (isActive === '0' && durationInSeconds == 0) status = 'failed';
 
+    // Dial legs to a support agent land here as their own event. We tag them
+    // with agent_number so the dashboard can compute per-agent stats.
+    // NOTE: field name/behavior assumed from AT's docs — confirm against the
+    // "📡 EVENT" log on a live agent-transfer call before relying on this.
+    const isAgentLeg = AGENTS.map(normalizePhone).includes(destination);
+
     await supabase.from('call_logs').upsert({
         session_id: sessionId,
         caller,
+        agent_number: isAgentLeg ? destination : undefined,
         status,
         duration: durationInSeconds,
         direction
     }, { onConflict: 'session_id' });
+
+    res.sendStatus(200);
+});
+
+
+// 🔹 TICKET STATUS UPDATE
+app.post('/ticket/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const { ticket_status } = req.body;
+
+    if (!['open', 'in_progress', 'resolved'].includes(ticket_status)) {
+        return res.status(400).send('Invalid ticket status');
+    }
+
+    const { error } = await supabase
+        .from('call_logs')
+        .update({ ticket_status })
+        .eq('session_id', sessionId);
+
+    if (error) {
+        console.error(error);
+        return res.status(500).send('Failed to update ticket');
+    }
 
     res.sendStatus(200);
 });
