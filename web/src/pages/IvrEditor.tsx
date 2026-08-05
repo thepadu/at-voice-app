@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -31,7 +31,7 @@ export default function IvrEditor() {
     const { data: greetingData } = useQuery({ queryKey: ['ivr-config'], queryFn: () => apiFetch('/api/ivr-config') });
     const { data: optionsData } = useQuery({ queryKey: ['ivr-options'], queryFn: () => apiFetch('/api/ivr-options') });
 
-    const options: IvrOption[] = optionsData?.options ?? [];
+    const options: IvrOption[] = useMemo(() => optionsData?.options ?? [], [optionsData]);
 
     const [greeting, setGreeting] = useState('');
     const [drafts, setDrafts] = useState<Record<string, IvrOption>>({});
@@ -46,7 +46,7 @@ export default function IvrEditor() {
 
     useEffect(() => {
         setDrafts(Object.fromEntries(options.map(o => [o.digit, o])));
-    }, [optionsData]);
+    }, [options]);
 
     function invalidateOptions() {
         queryClient.invalidateQueries({ queryKey: ['ivr-options'] });
