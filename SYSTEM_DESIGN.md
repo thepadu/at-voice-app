@@ -81,11 +81,24 @@ Vite + React + TypeScript + React Router + TanStack Query (`@tanstack/react-quer
 4. **Multi-country (Rwanda)**: confirmed one Africa's Talking account/credential set covers every market they operate in — Rwanda just needs a second Voice-enabled number under the same account. Not yet built: a `country` column on `agents`/`ivr_options`, and a way to resolve which country an inbound call belongs to (likely a destination-number field on the `/voice`/`/ivr` webhook — unverified which one). Phone validation is already general enough (see above) not to block this.
 5. **Redis/shared caching, pagination, push updates, rate limiting** — see Scalability notes above.
 
+### Gaps against the original design reference (`Chumz Call Center.dc.html`)
+
+The redesign phase covered the pages that already had real functionality — it was **not** a full implementation of that reference file. Specifically not built:
+
+- **Login**: a plain centered card (Google button only), not the reference's split-screen hero with mission copy and an email/password form.
+- **Dedicated Live Queue page** with per-row "Answer," SLA-based row coloring (amber ≥60s / red ≥90s wait), and its own 4 stat cards — folded instead into the existing Calls page's tabs plus Dashboard's "Live Now" list. No "Answer" action exists because there's no real telephony hook to attach it to yet (see live-queue "Answer" above).
+- **Dedicated Outbound & Missed page** with a "Call back" action and separate Outbound Log table — folded into Calls' tab set instead.
+- **Persistent active-call bar** (mute/hold/+ticket/end call, shown across every screen) and the **wrap-up disposition modal** (Resolved/Escalated/Follow-up/No resolution) — neither exists; both assume a browser-mediated call session, which doesn't exist without the live-queue/Answer work above.
+- **Calls-by-hour bar chart** on the Dashboard.
+- **Agent status has 3 states** (available/on_call/offline), not the reference's 4 (no "Break"); no "team" field on the card.
+- **Live Analytics badge** shows Calls/Agent requests/Missed — not Avg wait or CSAT, since neither is tracked anywhere in the data model.
+- **Keyboard shortcuts** (A/T/E) — not built; they act on the active-call bar, which doesn't exist.
+- **Agent/Supervisor toggle** is not a UI control — it's real, tied to actual login identity via `agents.role`, not a client-side preview switch like the reference.
+
 ## Verification
 
-No Node available in the environment these changes were authored in, so nothing has been executed — only reviewed by hand.
 1. Run every file in `migrations/` in order (all idempotent) against the Supabase project your Render env vars actually point to.
-2. `npm install && npm start` in `at-voice-app/`; `npm install && npm run build` in `web/` (check `npm run lint` / `npm test` too — this is the first time those scripts exist, so treat a clean run as itself a thing to verify).
+2. `npm install && npm start` in `at-voice-app/`; `npm install && npm run build` in `web/`. As of this writing this has actually been run (not just reviewed): backend boots and every route responds as expected, frontend installs with no version conflicts, builds with zero type errors, `npm run lint` is clean, and all Vitest tests pass.
 3. Confirm `/voice`, `/ivr`, `/handle-input`, `/events` still respond without auth.
 4. Log in with an account not linked to any `agents` row — confirm Agents/IVR are hidden and return 403 if visited directly. Then set that email's `role` to `supervisor` directly in Supabase, log out/in, confirm access.
 5. Place a real test call requesting an agent with 2+ agents marked `available` — confirm their phones ring simultaneously, and that the answering agent's row flips to `on_call` during the call and back after.
