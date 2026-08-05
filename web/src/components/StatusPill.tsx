@@ -1,9 +1,12 @@
 const COLORS: Record<string, string> = {
     available: '#10B981',
     on_call: '#1d4ed8',
+    ringing: '#F59E0B',
+    break: '#F59E0B',
     offline: '#6B7280',
     completed: '#10B981',
     ongoing: '#3B82F6',
+    queued: '#3B82F6',
     failed: '#EF4444',
     open: '#EF4444',
     in_progress: '#F59E0B',

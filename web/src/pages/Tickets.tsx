@@ -1,0 +1,185 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '../lib/api';
+import { useToast } from '../lib/toast';
+
+type Call = {
+    session_id: string;
+    caller: string;
+    duration: number | null;
+    created_at: string;
+};
+
+type Ticket = {
+    id: number;
+    session_id: string | null;
+    caller_name: string | null;
+    caller_number: string | null;
+    tag: string | null;
+    priority: string;
+    status: string;
+    assigned_agent_id: number | null;
+    assigned_agent_name: string | null;
+    notes: string | null;
+};
+
+type Agent = { id: number; name: string };
+
+const PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
+
+function errorMessage(err: unknown) {
+    return err instanceof Error ? err.message : 'Something went wrong';
+}
+
+export default function Tickets() {
+    const queryClient = useQueryClient();
+    const showToast = useToast();
+
+    const { data: callsData } = useQuery({ queryKey: ['calls', 'recent'], queryFn: () => apiFetch('/api/calls') });
+    const { data: ticketsData } = useQuery({ queryKey: ['tickets'], queryFn: () => apiFetch('/api/tickets') });
+    const { data: tagsData } = useQuery({ queryKey: ['ticket-tags'], queryFn: () => apiFetch('/api/ticket-tags') });
+    const { data: agentsData } = useQuery({ queryKey: ['agents-assignable'], queryFn: () => apiFetch('/api/agents/assignable') });
+
+    const recentCalls: Call[] = (callsData?.calls ?? []).slice(0, 8);
+    const tickets: Ticket[] = ticketsData?.tickets ?? [];
+    const tags: string[] = tagsData?.tags ?? [];
+    const agents: Agent[] = agentsData?.agents ?? [];
+
+    const [selectedCall, setSelectedCall] = useState<Call | null>(null);
+    const [tag, setTag] = useState('');
+    const [priority, setPriority] = useState('Medium');
+    const [assignedAgentId, setAssignedAgentId] = useState<number | ''>('');
+    const [notes, setNotes] = useState('');
+
+    function selectCall(call: Call) {
+        setSelectedCall(call);
+        setTag(tags[0] ?? '');
+        setPriority('Medium');
+        setAssignedAgentId('');
+        setNotes('');
+    }
+
+    const createTicket = useMutation({
+        mutationFn: () =>
+            apiFetch('/api/tickets', {
+                method: 'POST',
+                body: JSON.stringify({
+                    session_id: selectedCall?.session_id,
+                    caller_number: selectedCall?.caller,
+                    tag,
+                    priority,
+                    assigned_agent_id: assignedAgentId || null,
+                    notes
+                })
+            }),
+        onSuccess: () => {
+            showToast('Ticket created');
+            setSelectedCall(null);
+            queryClient.invalidateQueries({ queryKey: ['tickets'] });
+        },
+        onError: (err: unknown) => showToast(errorMessage(err), 'error')
+    });
+
+    return (
+        <div className="ivr-layout">
+            <div>
+                <div className="panel">
+                    <h3>Recent calls</h3>
+                    {recentCalls.length === 0 && <p className="empty">No calls yet.</p>}
+                    {recentCalls.map(call => (
+                        <div className="recent-call-row" key={call.session_id}>
+                            <div>
+                                <div style={{ fontWeight: 600 }}>{call.caller}</div>
+                                <div className="hint" style={{ margin: 0 }}>
+                                    {call.duration ?? 0}s · {new Date(call.created_at).toLocaleString()}
+                                </div>
+                            </div>
+                            <button className="btn btn-secondary" onClick={() => selectCall(call)}>
+                                + Ticket
+                            </button>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="panel">
+                    <h3>Tickets</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Caller</th>
+                                <th>Tag</th>
+                                <th>Priority</th>
+                                <th>Status</th>
+                                <th>Assigned</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {tickets.length === 0 && (
+                                <tr><td colSpan={6} className="empty">No tickets yet.</td></tr>
+                            )}
+                            {tickets.map(t => (
+                                <tr key={t.id}>
+                                    <td className="hint">TCK-{t.id}</td>
+                                    <td>{t.caller_number ?? t.caller_name ?? '—'}</td>
+                                    <td>{t.tag ?? '—'}</td>
+                                    <td>{t.priority}</td>
+                                    <td>
+                                        <span className="status-pill" style={{ background: '#F59E0B' }}>{t.status}</span>
+                                    </td>
+                                    <td>{t.assigned_agent_name ?? '—'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className="panel">
+                <h3>New ticket</h3>
+                {!selectedCall && (
+                    <p className="hint">Pick a call on the left to start a ticket for it.</p>
+                )}
+                {selectedCall && (
+                    <div>
+                        <div className="ticket-summary">
+                            <div><span>Caller</span><strong>{selectedCall.caller}</strong></div>
+                            <div><span>Duration</span><strong>{selectedCall.duration ?? 0}s</strong></div>
+                        </div>
+
+                        <label>
+                            Tag
+                            <select value={tag} onChange={e => setTag(e.target.value)}>
+                                {tags.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                        </label>
+                        <label>
+                            Priority
+                            <select value={priority} onChange={e => setPriority(e.target.value)}>
+                                {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                        </label>
+                        <label>
+                            Assign to agent
+                            <select value={assignedAgentId} onChange={e => setAssignedAgentId(e.target.value ? Number(e.target.value) : '')}>
+                                <option value="">Unassigned</option>
+                                {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </select>
+                        </label>
+                        <label>
+                            Notes
+                            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="What happened on this call..." />
+                        </label>
+
+                        <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
+                            <button className="btn btn-primary" onClick={() => createTicket.mutate()} disabled={createTicket.isPending}>
+                                Create ticket
+                            </button>
+                            <button className="btn btn-secondary" onClick={() => setSelectedCall(null)}>Cancel</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}

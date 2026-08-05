@@ -1,5 +1,7 @@
 import { NavLink } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../lib/auth';
+import { apiFetch } from '../../lib/api';
 
 function initials(name: string) {
     return name
@@ -13,6 +15,14 @@ function initials(name: string) {
 export default function Sidebar() {
     const { user, isSupervisor } = useAuth();
 
+    const { data: queueData } = useQuery({
+        queryKey: ['queue'],
+        queryFn: () => apiFetch('/api/queue'),
+        refetchInterval: 5000
+    });
+
+    const inQueue = queueData?.stats?.inQueue ?? 0;
+
     return (
         <aside className="sidebar">
             <div className="sidebar-logo">
@@ -24,8 +34,15 @@ export default function Sidebar() {
                 <NavLink to="/" end className="sidebar-link">
                     Dashboard
                 </NavLink>
-                <NavLink to="/calls" className="sidebar-link">
-                    Calls
+                <NavLink to="/queue" className="sidebar-link">
+                    Live Queue
+                    {inQueue > 0 && <span className="sidebar-badge">{inQueue}</span>}
+                </NavLink>
+                <NavLink to="/outbound" className="sidebar-link">
+                    Outbound &amp; Missed
+                </NavLink>
+                <NavLink to="/tickets" className="sidebar-link">
+                    Tags &amp; Tickets
                 </NavLink>
                 {isSupervisor && (
                     <>
@@ -34,6 +51,9 @@ export default function Sidebar() {
                         </NavLink>
                         <NavLink to="/ivr" className="sidebar-link">
                             IVR Builder
+                        </NavLink>
+                        <NavLink to="/forwarding" className="sidebar-link">
+                            Call Forwarding
                         </NavLink>
                     </>
                 )}

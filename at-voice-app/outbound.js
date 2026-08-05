@@ -1,15 +1,7 @@
-const AfricasTalking = require('africastalking');
+const { placeCall } = require('./lib/voice');
 const { toE164, isValidE164 } = require('./lib/phone');
 
 module.exports = function (app, requireAuth) {
-
-    const africastalking = AfricasTalking({
-        apiKey: process.env.AT_API_KEY,
-        username: process.env.AT_USERNAME
-    });
-
-    const voice = africastalking.VOICE;
-    const AT_NUMBER = process.env.AT_VOICE_NUMBER;
 
     // 📞 CALL ROUTE (GET + POST supported)
     app.all('/call', requireAuth, async (req, res) => {
@@ -28,22 +20,10 @@ module.exports = function (app, requireAuth) {
             return res.status(400).send('Invalid phone number');
         }
 
-        if (!AT_NUMBER) {
-            console.error("❌ AT_VOICE_NUMBER not set");
-            return res.status(500).send('Server misconfigured');
-        }
-
         try {
             console.log("📞 Calling:", phone);
 
-            const payload = {
-                callFrom: AT_NUMBER,   // must be +254...
-                callTo: [phone]        // must be +254...
-            };
-
-            console.log("📦 Payload:", payload);
-
-            const response = await voice.call(payload);
+            const response = await placeCall(phone);
 
             console.log("✅ Call started:", response);
 

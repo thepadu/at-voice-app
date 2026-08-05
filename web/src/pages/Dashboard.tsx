@@ -48,6 +48,12 @@ export default function Dashboard() {
         refetchInterval: 30000
     });
 
+    const { data: hourData } = useQuery({
+        queryKey: ['calls-by-hour'],
+        queryFn: () => apiFetch('/api/calls/by-hour'),
+        refetchInterval: 60000
+    });
+
     const summary: Summary | undefined = callsData?.summary;
     const live: Call[] = liveData?.calls ?? [];
     const agentStats: AgentStat[] = statsData?.agents ?? [];
@@ -79,6 +85,8 @@ export default function Dashboard() {
                     <p>{summary?.missed ?? '—'}</p>
                 </div>
             </div>
+
+            <CallsByHourChart hours={hourData?.hours ?? []} />
 
             <div className="panel">
                 <h3>🔴 Live Now</h3>
@@ -141,6 +149,24 @@ export default function Dashboard() {
                     )}
                 </div>
             )}
+        </div>
+    );
+}
+
+function CallsByHourChart({ hours }: { hours: { hour: number; count: number }[] }) {
+    const max = Math.max(1, ...hours.map(h => h.count));
+
+    return (
+        <div className="panel">
+            <h3>Calls by hour</h3>
+            <div className="hour-chart">
+                {hours.map(h => (
+                    <div className="hour-chart-bar-col" key={h.hour}>
+                        <div className="hour-chart-bar" style={{ height: `${Math.round((h.count / max) * 100)}%` }} />
+                        <div className="hour-chart-label">{h.hour % 12 === 0 ? 12 : h.hour % 12}{h.hour < 12 ? 'a' : 'p'}</div>
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }

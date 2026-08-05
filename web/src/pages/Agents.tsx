@@ -11,7 +11,7 @@ type Agent = {
     name: string;
     phone: string;
     email: string | null;
-    status: 'available' | 'on_call' | 'offline';
+    status: 'available' | 'on_call' | 'ringing' | 'break' | 'offline';
     role: 'agent' | 'supervisor';
 };
 
@@ -88,9 +88,15 @@ export default function Agents() {
         setFormOpen(true);
     }
 
+    // Available → Break → Offline → Available. "Available" places a real
+    // call to bring the agent onto the standby queue (see SYSTEM_DESIGN.md)
+    // — it's not just a flag flip. on_call/ringing are system-managed; the
+    // toggle treats clicking either as "give up and go offline."
     function nextStatus(agent: Agent): Agent['status'] {
-        if (agent.status === 'on_call') return 'offline';
-        return agent.status === 'available' ? 'offline' : 'available';
+        if (agent.status === 'available') return 'break';
+        if (agent.status === 'break') return 'offline';
+        if (agent.status === 'offline') return 'available';
+        return 'offline';
     }
 
     const containerRef = useModalA11y(formOpen, () => setFormOpen(false));
@@ -103,7 +109,9 @@ export default function Agents() {
                     <button className="btn btn-primary" onClick={openAddForm}>+ Add Agent</button>
                 </div>
                 <p className="hint">
-                    Only <strong>available</strong> agents are dialed — all at once — when a caller asks for support.
+                    Going <strong>available</strong> calls the agent's phone right now to bring them onto the
+                    support queue — they accept the next waiting caller by pressing 1. Not just a status
+                    flag: it's a real, billed call, so they need to actually pick up.
                 </p>
 
                 {agents.length === 0 && <p className="empty">No agents yet — add your first one.</p>}
@@ -122,7 +130,13 @@ export default function Agents() {
                                 <button
                                     className="pill-toggle"
                                     onClick={() => toggleStatus.mutate({ id: agent.id, status: nextStatus(agent) })}
-                                    title={agent.status === 'on_call' ? 'Click to go offline' : undefined}
+                                    title={
+                                        agent.status === 'ringing'
+                                            ? 'Calling their phone now…'
+                                            : agent.status === 'on_call'
+                                                ? 'Click to go offline'
+                                                : undefined
+                                    }
                                 >
                                     <StatusPill value={agent.status} />
                                 </button>

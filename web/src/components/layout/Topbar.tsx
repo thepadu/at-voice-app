@@ -5,9 +5,12 @@ import { useTheme } from '../../lib/theme';
 
 const TITLES: Record<string, string> = {
     '/': 'Dashboard',
-    '/calls': 'Calls',
+    '/queue': 'Live Queue',
+    '/outbound': 'Outbound & Missed',
+    '/tickets': 'Tags & Tickets',
     '/agents': 'Agents',
-    '/ivr': 'IVR Builder'
+    '/ivr': 'IVR Builder',
+    '/forwarding': 'Call Forwarding'
 };
 
 export default function Topbar() {

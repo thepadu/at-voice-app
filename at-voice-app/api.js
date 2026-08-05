@@ -1,5 +1,6 @@
 const { isValidE164 } = require('./lib/phone');
 const { invalidateAgentCache } = require('./lib/agentCache');
+const { placeCall } = require('./lib/voice');
 
 // JSON API for the React web app (/web). Mirrors the data shown on the old
 // HTML dashboard (dashboard.js, now removed) but as JSON instead of rendered
@@ -23,6 +24,30 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
 
     function isMissed(row) {
         return row.status === 'failed';
+    }
+
+    // Going "available" now places a real outbound call that brings the
+    // agent onto the standby hold-queue loop (see app.js's /agent-standby) —
+    // not just a DB flag flip like before. Sets 'ringing' immediately, then
+    // 'offline' again if the call itself fails to place (a bad number, AT
+    // account issue, etc.) so the UI doesn't show someone as available when
+    // no call was ever placed.
+    async function setAgentStatus(agent, status) {
+        if (status !== 'available') {
+            return supabase.from('agents').update({ status }).eq('id', agent.id).select().single();
+        }
+
+        await supabase.from('agents').update({ status: 'ringing' }).eq('id', agent.id);
+
+        try {
+            await placeCall(agent.phone, `agent-standby:${agent.id}`);
+        } catch (error) {
+            console.error(`❌ Failed to call agent ${agent.id} for standby:`, error.message);
+            await supabase.from('agents').update({ status: 'offline' }).eq('id', agent.id);
+            throw new Error('Could not reach that number — check it and try again');
+        }
+
+        return supabase.from('agents').select().eq('id', agent.id).single();
     }
 
     app.get('/api/me', requireAuth, (req, res) => {
@@ -71,15 +96,15 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         });
     });
 
-    // GET /api/calls/live — calls currently in the IVR or mid-conversation.
-    // This is the "who's on queue" view: it's a live snapshot of in-flight
-    // calls, not a real hold queue (see SYSTEM_DESIGN.md for what a real
-    // queue via Africa's Talking's Enqueue/Dequeue actions would take).
+    // GET /api/calls/live — every call currently in flight (IVR, queued, or
+    // mid-conversation). Used by the Dashboard's "Live Now" panel; the
+    // dedicated Live Queue page uses /api/queue below for the narrower
+    // "who's actually waiting" view with wait-time stats.
     app.get('/api/calls/live', requireAuth, async (req, res) => {
         const { data, error } = await supabase
             .from('call_logs')
             .select('*')
-            .in('status', ['ivr_started', 'input_received', 'ongoing'])
+            .in('status', ['ivr_started', 'input_received', 'queued', 'ongoing'])
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -88,6 +113,35 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         }
 
         res.json({ calls: data.filter(row => !isAgentLegRow(row)) });
+    });
+
+    // GET /api/queue — the Live Queue page: who's actually on hold right
+    // now (status 'queued'), plus wait-time stats. Rows are informational,
+    // not individually actionable from the browser — accepting a call
+    // happens by an available agent pressing a digit on their phone (see
+    // SYSTEM_DESIGN.md), not by clicking a row here.
+    app.get('/api/queue', requireAuth, async (req, res) => {
+        const { data, error } = await supabase
+            .from('call_logs')
+            .select('*')
+            .eq('status', 'queued')
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load queue' });
+        }
+
+        const waits = data.map(row => Math.floor((Date.now() - new Date(row.created_at).getTime()) / 1000));
+
+        res.json({
+            calls: data.map((row, i) => ({ ...row, waitSeconds: waits[i] })),
+            stats: {
+                inQueue: data.length,
+                avgWaitSeconds: waits.length ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length) : 0,
+                longestWaitSeconds: waits.length ? Math.max(...waits) : 0
+            }
+        });
     });
 
     // A bare count, not the roster itself — safe for the topbar's "N agents
@@ -183,23 +237,66 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     app.patch('/api/agents/me/status', requireAuth, async (req, res) => {
         const { status } = req.body;
 
-        if (!['available', 'offline'].includes(status)) {
+        if (!['available', 'break', 'offline'].includes(status)) {
             return res.status(400).json({ error: 'Invalid status' });
         }
 
-        const { data, error } = await supabase
+        const { data: agent, error: lookupError } = await supabase
             .from('agents')
-            .update({ status })
-            .eq('email', req.user.email)
             .select()
+            .eq('email', req.user.email)
             .single();
 
-        if (error || !data) {
+        if (lookupError || !agent) {
             return res.status(404).json({ error: 'No agent record linked to your account yet' });
         }
 
-        invalidateAgentCache();
-        res.json({ agent: data });
+        try {
+            const { data, error } = await setAgentStatus(agent, status);
+            if (error) throw new Error(error.message);
+            invalidateAgentCache();
+            res.json({ agent: data });
+        } catch (err) {
+            res.status(502).json({ error: err.message });
+        }
+    });
+
+    // Name-only list any authenticated user can fetch — enough to populate
+    // a ticket's "assign to" dropdown without exposing the full roster
+    // (phone numbers, emails) that GET /api/agents (below) is gated on.
+    app.get('/api/agents/assignable', requireAuth, async (req, res) => {
+        const { data, error } = await supabase.from('agents').select('id, name').order('name');
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load agents' });
+        }
+
+        res.json({ agents: data });
+    });
+
+    // Drives the active-call status bar and the wrap-up prompt: the
+    // logged-in agent's own in-progress call, if any. `call_logs.agent_number`
+    // is tagged by /events once Dequeue bridges someone to this agent's
+    // phone (see app.js) — this just looks that row up by the agent's own
+    // linked phone number.
+    app.get('/api/agents/me/active-call', requireAuth, async (req, res) => {
+        const { data: agent } = await supabase.from('agents').select('phone, status').eq('email', req.user.email).maybeSingle();
+
+        if (!agent) {
+            return res.json({ call: null, agentStatus: null });
+        }
+
+        const { data: call } = await supabase
+            .from('call_logs')
+            .select('*')
+            .eq('agent_number', agent.phone)
+            .eq('status', 'ongoing')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        res.json({ call: call ?? null, agentStatus: agent.status });
     });
 
     // ── Agent roster management (supervisors only) ─────────────────────
@@ -252,7 +349,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Invalid phone number' });
         }
 
-        if (status !== undefined && !['available', 'on_call', 'offline'].includes(status)) {
+        if (status !== undefined && !['available', 'on_call', 'ringing', 'break', 'offline'].includes(status)) {
             return res.status(400).json({ error: 'Invalid status' });
         }
 
@@ -260,22 +357,42 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Invalid role' });
         }
 
-        const updates = {};
-        if (name !== undefined) updates.name = name;
-        if (phone !== undefined) updates.phone = phone;
-        if (email !== undefined) updates.email = email || null;
-        if (status !== undefined) updates.status = status;
-        if (role !== undefined) updates.role = role;
+        const fieldUpdates = {};
+        if (name !== undefined) fieldUpdates.name = name;
+        if (phone !== undefined) fieldUpdates.phone = phone;
+        if (email !== undefined) fieldUpdates.email = email || null;
+        if (role !== undefined) fieldUpdates.role = role;
 
-        const { data, error } = await supabase.from('agents').update(updates).eq('id', id).select().single();
+        let agent;
 
-        if (error) {
-            console.error(error);
-            return res.status(500).json({ error: 'Failed to update agent' });
+        if (Object.keys(fieldUpdates).length > 0) {
+            const { data, error } = await supabase.from('agents').update(fieldUpdates).eq('id', id).select().single();
+            if (error) {
+                console.error(error);
+                return res.status(500).json({ error: 'Failed to update agent' });
+            }
+            agent = data;
+        } else {
+            const { data, error } = await supabase.from('agents').select().eq('id', id).single();
+            if (error) {
+                console.error(error);
+                return res.status(404).json({ error: 'Agent not found' });
+            }
+            agent = data;
+        }
+
+        if (status !== undefined) {
+            try {
+                const { data, error } = await setAgentStatus(agent, status);
+                if (error) throw new Error(error.message);
+                agent = data;
+            } catch (err) {
+                return res.status(502).json({ error: err.message });
+            }
         }
 
         invalidateAgentCache();
-        res.json({ agent: data });
+        res.json({ agent });
     });
 
     app.delete('/api/agents/:id', requireSupervisor, async (req, res) => {
@@ -395,5 +512,232 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         }
 
         res.json({ ok: true });
+    });
+
+    // ── Tickets (Tags & Tickets page) ───────────────────────────────────
+    // Any authenticated user can read/create/update tickets — this is
+    // day-to-day agent work, not roster/config management.
+
+    app.get('/api/tickets', requireAuth, async (req, res) => {
+        const { data, error } = await supabase
+            .from('tickets')
+            .select('*, agents(name)')
+            .order('created_at', { ascending: false })
+            .limit(200);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load tickets' });
+        }
+
+        res.json({
+            tickets: data.map(t => ({ ...t, assigned_agent_name: t.agents?.name ?? null, agents: undefined }))
+        });
+    });
+
+    app.post('/api/tickets', requireAuth, async (req, res) => {
+        const { session_id, caller_name, caller_number, tag, priority, status, assigned_agent_id, notes } = req.body;
+
+        if (priority !== undefined && !['Low', 'Medium', 'High', 'Urgent'].includes(priority)) {
+            return res.status(400).json({ error: 'Invalid priority' });
+        }
+
+        const validStatuses = ['Open', 'Resolved', 'Escalated', 'Follow-up needed', 'No resolution'];
+        if (status !== undefined && !validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        const { data, error } = await supabase
+            .from('tickets')
+            .insert({
+                session_id: session_id || null,
+                caller_name: caller_name || null,
+                caller_number: caller_number || null,
+                tag: tag || null,
+                priority: priority || 'Medium',
+                status: status || 'Open',
+                assigned_agent_id: assigned_agent_id || null,
+                notes: notes || null
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to create ticket' });
+        }
+
+        res.status(201).json({ ticket: data });
+    });
+
+    app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
+        const { status, priority, tag, assigned_agent_id, notes } = req.body;
+
+        const validStatuses = ['Open', 'Resolved', 'Escalated', 'Follow-up needed', 'No resolution'];
+        if (status !== undefined && !validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        const updates = {};
+        if (status !== undefined) updates.status = status;
+        if (priority !== undefined) updates.priority = priority;
+        if (tag !== undefined) updates.tag = tag;
+        if (assigned_agent_id !== undefined) updates.assigned_agent_id = assigned_agent_id;
+        if (notes !== undefined) updates.notes = notes;
+
+        const { data, error } = await supabase.from('tickets').update(updates).eq('id', req.params.id).select().single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to update ticket' });
+        }
+
+        res.json({ ticket: data });
+    });
+
+    app.get('/api/ticket-tags', requireAuth, async (req, res) => {
+        const { data, error } = await supabase.from('ticket_tags').select('name').order('name');
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load tags' });
+        }
+
+        res.json({ tags: data.map(t => t.name) });
+    });
+
+    app.post('/api/ticket-tags', requireSupervisor, async (req, res) => {
+        const { name } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({ error: 'Tag name is required' });
+        }
+
+        const { error } = await supabase.from('ticket_tags').insert({ name: name.trim() });
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to add tag (it may already exist)' });
+        }
+
+        res.status(201).json({ ok: true });
+    });
+
+    app.delete('/api/ticket-tags/:name', requireSupervisor, async (req, res) => {
+        const { error } = await supabase.from('ticket_tags').delete().eq('name', req.params.name);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to remove tag' });
+        }
+
+        res.json({ ok: true });
+    });
+
+    // ── Call Forwarding (supervisors only) ──────────────────────────────
+    // NOTE: this is data management only — it is NOT yet wired into actual
+    // call routing. Africa's Talking's Enqueue action has no documented
+    // timeout/max-wait parameter, and there's no API to reach into an
+    // already-queued call to redirect it, so there's currently no confirmed
+    // mechanism to trigger a "no answer" rule automatically. Building that
+    // trigger would mean guessing at undocumented behavior — flagged here
+    // rather than done. See SYSTEM_DESIGN.md.
+
+    app.get('/api/forwarding-config', requireSupervisor, async (req, res) => {
+        const { data, error } = await supabase.from('forwarding_config').select('enabled').eq('id', 1).single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load forwarding config' });
+        }
+
+        res.json({ enabled: data.enabled });
+    });
+
+    app.patch('/api/forwarding-config', requireSupervisor, async (req, res) => {
+        const { enabled } = req.body;
+
+        const { error } = await supabase.from('forwarding_config').update({ enabled: !!enabled }).eq('id', 1);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to update forwarding config' });
+        }
+
+        res.json({ ok: true });
+    });
+
+    app.get('/api/forwarding-rules', requireSupervisor, async (req, res) => {
+        const { data, error } = await supabase.from('forwarding_rules').select('*').order('id');
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load forwarding rules' });
+        }
+
+        res.json({ rules: data });
+    });
+
+    app.post('/api/forwarding-rules', requireSupervisor, async (req, res) => {
+        const { condition, destination } = req.body;
+
+        if (!['no_answer', 'busy', 'always', 'after_hours'].includes(condition)) {
+            return res.status(400).json({ error: 'Invalid condition' });
+        }
+
+        if (!destination || !destination.trim()) {
+            return res.status(400).json({ error: 'Destination is required' });
+        }
+
+        const { data, error } = await supabase
+            .from('forwarding_rules')
+            .insert({ condition, destination: destination.trim() })
+            .select()
+            .single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to add rule' });
+        }
+
+        res.status(201).json({ rule: data });
+    });
+
+    app.delete('/api/forwarding-rules/:id', requireSupervisor, async (req, res) => {
+        const { error } = await supabase.from('forwarding_rules').delete().eq('id', req.params.id);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to remove rule' });
+        }
+
+        res.json({ ok: true });
+    });
+
+    // ── Dashboard: calls by hour ─────────────────────────────────────────
+
+    app.get('/api/calls/by-hour', requireAuth, async (req, res) => {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const { data, error } = await supabase
+            .from('call_logs')
+            .select('created_at')
+            .gte('created_at', startOfDay.toISOString());
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load call volume' });
+        }
+
+        const hourCounts = new Array(24).fill(0);
+        data.forEach(row => {
+            const hour = new Date(row.created_at).getHours();
+            hourCounts[hour]++;
+        });
+
+        res.json({
+            hours: hourCounts.map((count, hour) => ({ hour, count }))
+        });
     });
 };

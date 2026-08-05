@@ -31,28 +31,36 @@ module.exports = function (app, supabase) {
         <html>
         <head>
             <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <link rel="preconnect" href="https://fonts.googleapis.com">
-            <link href="https://fonts.googleapis.com/css2?family=Sora:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
             <style>
                 * { box-sizing: border-box; }
                 body {
                     margin: 0;
-                    font-family: 'Public Sans', -apple-system, sans-serif;
-                    background: #f8fafc;
+                    font-family: 'Public Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+                    color: #0f172a;
+                }
+                .split {
                     display: flex;
-                    height: 100vh;
+                    min-height: 100vh;
+                }
+                .hero {
+                    flex: 1 1 42%;
+                    background: #14532d;
+                    color: #ecfdf5;
+                    padding: 64px;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                    min-width: 320px;
+                }
+                .hero-logo {
+                    display: flex;
                     align-items: center;
-                    justify-content: center;
+                    gap: 10px;
                 }
-                .card {
-                    background: white;
-                    padding: 40px;
-                    border-radius: 12px;
-                    border: 1px solid #e2e8f0;
-                    text-align: center;
-                    max-width: 360px;
-                }
-                .logo {
+                .hero-logo-mark {
                     width: 34px;
                     height: 34px;
                     border-radius: 9px;
@@ -63,28 +71,125 @@ module.exports = function (app, supabase) {
                     font-family: 'Sora', sans-serif;
                     font-weight: 800;
                     color: #14532d;
-                    margin: 0 auto 16px;
                 }
-                h2 { font-family: 'Sora', sans-serif; font-weight: 800; margin: 0 0 6px; color: #0f172a; }
-                p { color: #64748b; font-size: 14px; margin: 0 0 24px; }
+                .hero-logo-text {
+                    font-family: 'Sora', sans-serif;
+                    font-weight: 700;
+                    font-size: 20px;
+                    letter-spacing: 0.02em;
+                }
+                .hero-headline {
+                    font-family: 'Sora', sans-serif;
+                    font-weight: 800;
+                    font-size: 34px;
+                    line-height: 1.25;
+                    max-width: 420px;
+                }
+                .hero-sub {
+                    margin-top: 18px;
+                    font-size: 15px;
+                    color: #a7f3d0;
+                    max-width: 400px;
+                    line-height: 1.6;
+                }
+                .hero-bullets {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 14px;
+                    margin-top: 32px;
+                }
+                .hero-bullet {
+                    display: flex;
+                    gap: 12px;
+                    align-items: center;
+                    font-size: 14px;
+                    color: #d1fae5;
+                }
+                .hero-bullet-dot {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    background: #4ade80;
+                    flex-shrink: 0;
+                }
+                .hero-footer {
+                    font-size: 12px;
+                    color: #86efac;
+                }
+                .form-side {
+                    flex: 1;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 40px;
+                    background: #ffffff;
+                }
+                .form-card {
+                    width: 100%;
+                    max-width: 360px;
+                    text-align: center;
+                }
+                .form-title {
+                    font-family: 'Sora', sans-serif;
+                    font-weight: 800;
+                    font-size: 26px;
+                    margin: 0 0 6px;
+                }
+                .form-sub {
+                    color: #64748b;
+                    font-size: 14px;
+                    margin: 0 0 28px;
+                }
                 a.btn {
-                    display: inline-block;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 10px;
+                    width: 100%;
                     background: #15803d;
                     color: white;
-                    padding: 11px 22px;
+                    padding: 12px 22px;
                     border-radius: 8px;
                     text-decoration: none;
                     font-weight: 700;
-                    font-size: 14px;
+                    font-size: 15px;
+                }
+                @media (max-width: 720px) {
+                    .hero { display: none; }
                 }
             </style>
         </head>
         <body>
-            <div class="card">
-                <div class="logo">C</div>
-                <h2>Chumz Support</h2>
-                <p>Sign in with Google to continue</p>
-                <a href="/auth/google" class="btn">Sign in with Google</a>
+            <div class="split">
+                <div class="hero">
+                    <div class="hero-logo">
+                        <div class="hero-logo-mark">C</div>
+                        <div class="hero-logo-text">Chumz</div>
+                    </div>
+                    <div>
+                        <div class="hero-headline">Every call is someone trusting us with their savings.</div>
+                        <div class="hero-sub">
+                            This console is how we show up for them — queue, tickets, IVR routing, and
+                            forwarding, all in one place, so no caller waits and no issue gets missed.
+                        </div>
+                        <div class="hero-bullets">
+                            <div class="hero-bullet"><div class="hero-bullet-dot"></div>Real-time queue &amp; agent visibility</div>
+                            <div class="hero-bullet"><div class="hero-bullet-dot"></div>Update IVR routing without filing an engineering ticket</div>
+                            <div class="hero-bullet"><div class="hero-bullet-dot"></div>Tag and ticket calls without leaving the queue</div>
+                        </div>
+                    </div>
+                    <div class="hero-footer">© ${new Date().getFullYear()} Chumz. Internal tool — not for external distribution.</div>
+                </div>
+                <div class="form-side">
+                    <div class="form-card">
+                        <div class="form-title">Welcome back</div>
+                        <p class="form-sub">Sign in with your Google account to start your shift.</p>
+                        <a href="/auth/google" class="btn">
+                            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/><path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.11-7.45 2.11-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.69 28.19A13.9 13.9 0 0 1 10.94 24c0-1.45.25-2.86.7-4.19v-5.7H4.34A22.9 22.9 0 0 0 2 24c0 3.72.89 7.23 2.34 10.19l7.35-5.7z"/><path fill="#EA4335" d="M24 10.75c3.23 0 6.14 1.11 8.42 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 13.81l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/></svg>
+                            Sign in with Google
+                        </a>
+                    </div>
+                </div>
             </div>
         </body>
         </html>

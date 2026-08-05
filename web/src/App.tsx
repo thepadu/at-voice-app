@@ -5,12 +5,16 @@ import { queryClient } from './lib/queryClient';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ThemeProvider } from './lib/theme';
 import { ToastProvider } from './lib/toast';
+import { ActiveCallProvider } from './lib/activeCall';
 import Layout from './components/layout/Layout';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Calls = lazy(() => import('./pages/Calls'));
+const LiveQueue = lazy(() => import('./pages/LiveQueue'));
+const OutboundMissed = lazy(() => import('./pages/OutboundMissed'));
+const Tickets = lazy(() => import('./pages/Tickets'));
 const Agents = lazy(() => import('./pages/Agents'));
 const IvrEditor = lazy(() => import('./pages/IvrEditor'));
+const CallForwarding = lazy(() => import('./pages/CallForwarding'));
 
 function RequireSupervisor({ children }: { children: ReactNode }) {
     const { user, loading, isSupervisor } = useAuth();
@@ -36,7 +40,9 @@ function AppRoutes() {
         <Suspense fallback={<div className="page-loading">Loading…</div>}>
             <Routes>
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/calls" element={<Calls />} />
+                <Route path="/queue" element={<LiveQueue />} />
+                <Route path="/outbound" element={<OutboundMissed />} />
+                <Route path="/tickets" element={<Tickets />} />
                 <Route
                     path="/agents"
                     element={
@@ -53,6 +59,14 @@ function AppRoutes() {
                         </RequireSupervisor>
                     }
                 />
+                <Route
+                    path="/forwarding"
+                    element={
+                        <RequireSupervisor>
+                            <CallForwarding />
+                        </RequireSupervisor>
+                    }
+                />
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
         </Suspense>
@@ -65,11 +79,13 @@ export default function App() {
             <ThemeProvider>
                 <ToastProvider>
                     <AuthProvider>
-                        <BrowserRouter basename="/app">
-                            <Layout>
-                                <AppRoutes />
-                            </Layout>
-                        </BrowserRouter>
+                        <ActiveCallProvider>
+                            <BrowserRouter basename="/app">
+                                <Layout>
+                                    <AppRoutes />
+                                </Layout>
+                            </BrowserRouter>
+                        </ActiveCallProvider>
                     </AuthProvider>
                 </ToastProvider>
             </ThemeProvider>

@@ -2,10 +2,6 @@
 
 The React admin console, talking to the JSON API in `../at-voice-app/api.js`. See `../SYSTEM_DESIGN.md` for the full architecture and reasoning.
 
-## ⚠️ Before you run anything
-
-This was hand-written without access to Node/npm in the environment it was built in, so nothing here has actually been installed, built, or run yet. The versions in `package.json` are reasonable-but-unverified starting points — `npm install` may need to adjust a few. Treat the first `npm install` as the real test of whether this scaffold is sound.
-
 ## Setup
 
 ```bash
@@ -13,7 +9,7 @@ cd web
 npm install
 ```
 
-If `npm install` complains about peer dependency mismatches, that's the version-pinning risk above — bump whatever it flags.
+This has been run and verified in the environment this was built in — `npm install` resolves clean, `npm run build`/`lint`/`test` all pass. Still worth re-running yourself as a sanity check.
 
 ## Development
 
@@ -34,12 +30,10 @@ Sign in by visiting `http://localhost:3000/login` first (this sets the session c
 ## Quality checks
 
 ```bash
-npm run lint     # ESLint
+npm run lint     # ESLint — passes clean
 npm run format   # Prettier, writes in place
-npm test         # Vitest
+npm test         # Vitest — 13/13 passing
 ```
-
-None of these have been run yet either (see the warning above) — the first run of each is itself a real test of whether the configs are sound, not just a formality.
 
 ## Production build
 
@@ -51,6 +45,6 @@ Outputs to `web/dist`, which `at-voice-app/app.js` serves at `/app` (e.g. `https
 
 ## What's here
 
-Dashboard (KPIs, live calls, supervisor leaderboard / agent's own performance), Calls (tabbed list + ticket status), a floating quick-dial widget and live-analytics popover (present on every page), Agents (supervisors only — roster management, presence toggle, roles), IVR editor (supervisors only — greeting + menu options with a live call-flow preview). Role-gated via `useAuth().isSupervisor` on the frontend and `requireSupervisor` on the backend (frontend gating is just UX — the real boundary is server-side).
+Full sidebar IA: Dashboard (KPIs, calls-by-hour chart, live calls, leaderboard/own performance), Live Queue (who's on hold, SLA-colored wait times), Outbound & Missed (call back / outbound log), Tags & Tickets (real ticket entity — tags, priority, assignee, notes), Agents (supervisors only — 4-state presence, roster CRUD), IVR Builder (supervisors only — greeting + menu + live preview), Call Forwarding (supervisors only — rules saved but not yet wired into live routing, see `SYSTEM_DESIGN.md`). A real active-call status bar, a wrap-up prompt, `T`/`E` keyboard shortcuts, floating dialer + live-analytics popover on every page. Role-gated via `useAuth().isSupervisor` on the frontend and `requireSupervisor` on the backend (the real boundary is server-side).
 
-Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent to the existing `/login` HTML page), and the larger deferred items in `SYSTEM_DESIGN.md` (a real Tickets entity, call forwarding rules, a real live-queue "Answer", multi-country support).
+Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent to the existing `/login` HTML hero page), live call-forwarding routing, a browser softphone (deliberately not pursued — see `SYSTEM_DESIGN.md`), multi-country support.

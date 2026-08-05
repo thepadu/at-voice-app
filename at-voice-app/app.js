@@ -25,11 +25,13 @@ const supabase = createClient(
 const { requireAuth, requireSupervisor } = authRoutes(app, supabase);
 
 const IVR_TIMEOUT = 7;
+const STANDBY_TIMEOUT = 30;
+const QUEUE_NAME = 'support-queue';
+const BASE_URL = 'https://at-voice-app.onrender.com';
 
-// 🔧 IVR menu + agent list are dashboard-editable (see api.js) — stored in
-// Supabase's `ivr_config`/`ivr_options` and `agents` tables (migrations
-// 003/004) instead of hardcoded here, so changing a prompt or adding an
-// agent doesn't need a code deploy.
+// 🔧 IVR menu is dashboard-editable (see api.js) — stored in Supabase's
+// `ivr_config`/`ivr_options` tables (migrations 004) instead of hardcoded
+// here, so changing a prompt doesn't need a code deploy.
 async function getIvrGreeting() {
     const { data, error } = await supabase.from('ivr_config').select('greeting').eq('id', 1).single();
 
@@ -55,21 +57,6 @@ async function getIvrOptions() {
     return data;
 }
 
-async function getAvailableAgents() {
-    const { data, error } = await supabase
-        .from('agents')
-        .select('*')
-        .eq('status', 'available')
-        .order('id', { ascending: true });
-
-    if (error) {
-        console.error('❌ Failed to load agents:', error);
-        return [];
-    }
-
-    return data;
-}
-
 // Routes
 apiRoutes(app, supabase, requireAuth, requireSupervisor);
 outboundRoutes(app, requireAuth);
@@ -85,17 +72,6 @@ app.get('/dashboard', (req, res) => {
 });
 
 
-// 🔹 ENTRY
-app.post('/voice', (req, res) => {
-    res.set('Content-Type', 'application/xml');
-
-    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-        '<Response>' +
-            '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
-        '</Response>');
-});
-
-
 // XML-escape dynamic text before embedding it in a voice response — the IVR
 // menu text and agent list are dashboard-editable (by any authenticated
 // supervisor), so someone typing "Terms & Conditions" shouldn't produce
@@ -108,6 +84,31 @@ function escapeXml(value) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&apos;');
 }
+
+
+// 🔹 ENTRY — the single voice callback URL configured on the AT account for
+// every call (inbound customer calls AND our own outbound calls, once
+// answered — AT has no per-call callback override, see lib/voice.js).
+// clientRequestId is how we tell an agent-standby call apart from a regular
+// inbound customer call landing here.
+app.post('/voice', (req, res) => {
+    res.set('Content-Type', 'application/xml');
+
+    const standbyMatch = /^agent-standby:(\d+)$/.exec(req.body.clientRequestId || '');
+
+    if (standbyMatch) {
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                `<Redirect>${BASE_URL}/agent-standby?agentId=${standbyMatch[1]}</Redirect>` +
+            '</Response>');
+    }
+
+    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+        '<Response>' +
+            `<Redirect>${BASE_URL}/ivr</Redirect>` +
+        '</Response>');
+});
+
 
 // 🔹 IVR MENU + LOG ENTRY
 app.post('/ivr', async (req, res) => {
@@ -133,12 +134,12 @@ app.post('/ivr', async (req, res) => {
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
 
-            `<GetDigits timeout="${IVR_TIMEOUT}" numDigits="1" callbackUrl="https://at-voice-app.onrender.com/handle-input">` +
+            `<GetDigits timeout="${IVR_TIMEOUT}" numDigits="1" callbackUrl="${BASE_URL}/handle-input">` +
                 `<Say>${menuText}</Say>` +
             '</GetDigits>' +
 
             '<Say>No option was selected.</Say>' +
-            '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+            `<Redirect>${BASE_URL}/ivr</Redirect>` +
 
         '</Response>');
 });
@@ -168,45 +169,96 @@ app.post('/handle-input', async (req, res) => {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
                 '<Say>Invalid input. Please try again.</Say>' +
-                '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+                `<Redirect>${BASE_URL}/ivr</Redirect>` +
             '</Response>');
     }
 
     if (option.action === 'repeat_menu') {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
-                '<Redirect>https://at-voice-app.onrender.com/ivr</Redirect>' +
+                `<Redirect>${BASE_URL}/ivr</Redirect>` +
             '</Response>');
     }
 
     if (option.action === 'transfer_agent') {
-        const agents = await getAvailableAgents();
+        // Real hold queue (Enqueue/Dequeue) instead of directly dialing
+        // agents — see SYSTEM_DESIGN.md for why (the only Africa's Talking
+        // browser-calling SDK is an abandoned package; this rests on their
+        // actually-supported phone-based queueing instead).
+        await supabase.from('call_logs').upsert({
+            session_id: sessionId,
+            caller,
+            status: 'queued'
+        }, { onConflict: 'session_id' });
 
-        if (agents.length === 0) {
-            return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-                '<Response>' +
-                    '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>' +
-                '</Response>');
-        }
-
-        // Ring every available agent at once (sequential="false") instead of
-        // one-after-another — with N agents, sequential dialing means up to
-        // N × 15s of pure ringing before a caller even reaches someone.
-        // Whoever picks up first gets the call.
-        const phoneList = agents.map(a => escapeXml(a.phone)).join(',');
-
-        const body =
-            `<Say>${escapeXml(option.response_message)}</Say>` +
-            `<Dial phoneNumbers="${phoneList}" sequential="false" timeout="15" record="true"/>` +
-            '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>';
-
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' + '<Response>' + body + '</Response>');
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                `<Say>${escapeXml(option.response_message)}</Say>` +
+                `<Enqueue name="${QUEUE_NAME}"/>` +
+            '</Response>');
     }
 
     // action === 'message'
     return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
             `<Say>${escapeXml(option.response_message)}</Say>` +
+        '</Response>');
+});
+
+
+// 🔹 AGENT STANDBY LOOP — reached when an agent answers the outbound call
+// placed by going "available" (see api.js). Keeps their line open and
+// listening for a digit press, which is the only way to trigger a Dequeue
+// (Africa's Talking has no API to inject new instructions into a live call
+// from our server — the trigger must come from inside the call itself).
+app.post('/agent-standby', async (req, res) => {
+    const agentId = req.query.agentId;
+
+    await supabase.from('agents').update({ status: 'available' }).eq('id', agentId);
+
+    res.set('Content-Type', 'application/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+        '<Response>' +
+            '<Say>You are now online for Chumz support calls.</Say>' +
+            `<GetDigits timeout="${STANDBY_TIMEOUT}" numDigits="1" callbackUrl="${BASE_URL}/agent-standby-input?agentId=${agentId}">` +
+                '<Say>Press 1 to check for a waiting call.</Say>' +
+            '</GetDigits>' +
+            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}</Redirect>` +
+        '</Response>');
+});
+
+app.post('/agent-standby-input', async (req, res) => {
+    const agentId = req.query.agentId;
+
+    res.set('Content-Type', 'application/xml');
+
+    // Whoever has been waiting longest — see the note in SYSTEM_DESIGN.md
+    // about this being a best-effort "who's next" indicator, not a
+    // guarantee: Dequeue itself decides who actually gets bridged, and if
+    // two agents check at nearly the same moment this read isn't atomic
+    // against that.
+    const { data: waiting } = await supabase
+        .from('call_logs')
+        .select('session_id')
+        .eq('status', 'queued')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+    if (waiting) {
+        await supabase.from('agents').update({ status: 'on_call' }).eq('id', agentId);
+
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                `<Dequeue name="${QUEUE_NAME}"/>` +
+                `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}</Redirect>` +
+            '</Response>');
+    }
+
+    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+        '<Response>' +
+            '<Say>No calls waiting right now.</Say>' +
+            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}</Redirect>` +
         '</Response>');
 });
 
@@ -233,23 +285,19 @@ app.post('/events', async (req, res) => {
     if (isActive === '0' && durationInSeconds > 0) status = 'completed';
     if (isActive === '0' && durationInSeconds == 0) status = 'failed';
 
-    // Dial legs to a support agent land here as their own event. We tag them
-    // with agent_number so the dashboard can compute per-agent stats, and
-    // auto-track that agent's presence so a second, overlapping call doesn't
-    // also ring them while they're mid-call.
+    // Dial/standby legs to an agent land here as their own event. We tag
+    // them with agent_number for stats. Presence transitions to
+    // 'available'/'on_call' are owned by /agent-standby and
+    // /agent-standby-input (they know precisely what's happening); this
+    // handler only reacts to the whole call ending, since that's the one
+    // agent-presence transition nothing else observes.
     // NOTE: field name/behavior assumed from AT's docs — confirm against the
-    // "📡 EVENT" log on a live agent-transfer call before relying on this.
+    // "📡 EVENT" log on a live call before relying on this.
     const agentPhones = await getAgentPhones(supabase, normalizePhone);
     const matchedAgent = agentPhones.find(a => a.normalized === destination);
 
-    if (matchedAgent) {
-        if (status === 'ongoing') {
-            await supabase.from('agents').update({ status: 'on_call' })
-                .eq('phone', matchedAgent.phone).eq('status', 'available');
-        } else if (status === 'completed' || status === 'failed') {
-            await supabase.from('agents').update({ status: 'available' })
-                .eq('phone', matchedAgent.phone).eq('status', 'on_call');
-        }
+    if (matchedAgent && (status === 'completed' || status === 'failed')) {
+        await supabase.from('agents').update({ status: 'offline' }).eq('phone', matchedAgent.phone);
     }
 
     await supabase.from('call_logs').upsert({
@@ -260,29 +308,6 @@ app.post('/events', async (req, res) => {
         duration: durationInSeconds,
         direction
     }, { onConflict: 'session_id' });
-
-    res.sendStatus(200);
-});
-
-
-// 🔹 TICKET STATUS UPDATE
-app.post('/ticket/:sessionId', requireAuth, async (req, res) => {
-    const { sessionId } = req.params;
-    const { ticket_status } = req.body;
-
-    if (!['open', 'in_progress', 'resolved'].includes(ticket_status)) {
-        return res.status(400).send('Invalid ticket status');
-    }
-
-    const { error } = await supabase
-        .from('call_logs')
-        .update({ ticket_status })
-        .eq('session_id', sessionId);
-
-    if (error) {
-        console.error(error);
-        return res.status(500).send('Failed to update ticket');
-    }
 
     res.sendStatus(200);
 });
