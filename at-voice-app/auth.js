@@ -9,7 +9,25 @@ module.exports = function (app) {
         process.env.GOOGLE_CALLBACK_URL
     );
 
-    const ALLOWED_DOMAIN = process.env.ALLOWED_DOMAIN || 'chumz.io';
+    // Login is open to ANY Google account — no domain or allowlist check.
+    // This was a deliberate choice (confirmed 2026-08-05), not an oversight:
+    // anyone who reaches /login and signs in with Google gets full access to
+    // call logs (customer phone numbers), agent management, the IVR editor,
+    // and the dialer (which places real, billed calls). Revisit this if that
+    // stops being an acceptable tradeoff — an allowlist is a small change
+    // from here (check payload.email against a stored list of approved
+    // addresses in the callback below, instead of skipping the check).
+
+    // Without these, generateAuthUrl() silently builds a URL with no
+    // redirect_uri param, which Google rejects with a cryptic
+    // "Missing required parameter: redirect_uri" error on its own consent
+    // screen — nothing in this app's own logs. Fail loudly here instead.
+    const missingEnvVars = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_CALLBACK_URL', 'JWT_SECRET']
+        .filter(key => !process.env[key]);
+
+    if (missingEnvVars.length) {
+        console.error(`❌ Google SSO is misconfigured — missing env var(s): ${missingEnvVars.join(', ')}`);
+    }
 
     app.get('/login', (req, res) => {
         res.send(`
@@ -17,7 +35,7 @@ module.exports = function (app) {
         <body style="font-family:-apple-system,sans-serif;display:flex;height:100vh;align-items:center;justify-content:center;background:#F5F7FB;">
             <div style="background:white;padding:40px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.05);text-align:center;">
                 <h2>💚 Chumz Support</h2>
-                <p style="color:#6B7280;">Sign in with your @${ALLOWED_DOMAIN} Google account</p>
+                <p style="color:#6B7280;">Sign in with Google to continue</p>
                 <a href="/auth/google" style="display:inline-block;background:#0F9D58;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">
                     Sign in with Google
                 </a>
@@ -28,6 +46,13 @@ module.exports = function (app) {
     });
 
     app.get('/auth/google', (req, res) => {
+        if (missingEnvVars.length) {
+            return res.status(500).send(
+                `Google SSO is misconfigured on the server — missing: ${missingEnvVars.join(', ')}. ` +
+                `Set these in Render's Environment tab and redeploy.`
+            );
+        }
+
         const url = client.generateAuthUrl({
             scope: ['profile', 'email'],
             prompt: 'select_account'
@@ -45,9 +70,8 @@ module.exports = function (app) {
 
             const payload = ticket.getPayload();
 
-            const emailDomain = (payload.email || '').split('@')[1];
-            if (emailDomain !== ALLOWED_DOMAIN || !payload.email_verified) {
-                return res.status(403).send(`Access restricted to @${ALLOWED_DOMAIN} accounts`);
+            if (!payload.email_verified) {
+                return res.status(403).send('Your Google account email is not verified');
             }
 
             const sessionToken = jwt.sign(

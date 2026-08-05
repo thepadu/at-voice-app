@@ -28,8 +28,10 @@ No new database is introduced. `call_logs` (plus `ticket_status`/`agent_number` 
 Same Google SSO already built for the HTML dashboard, unchanged:
 - `GET /login` → "Sign in with Google"
 - `GET /auth/google` → redirect to Google
-- `GET /auth/google/callback` → verifies the ID token, rejects anything outside `@chumz.io`, sets an `httpOnly` session cookie, redirects to `/`
+- `GET /auth/google/callback` → verifies the ID token, sets an `httpOnly` session cookie, redirects to `/`
 - `GET /logout` → clears the cookie
+
+**Login is open to any Google account** — the original `@chumz.io`-only restriction was removed on 2026-08-05, a deliberate call, not a bug. Anyone who reaches `/login` and completes Google sign-in gets full access: call logs (customer phone numbers), agent management, the IVR editor, and the dialer (real, billed calls). If that stops being acceptable, `auth.js`'s callback is where an allowlist check would go back in — see the comment there.
 
 Because the React app is served from the same origin as the API, the browser sends the session cookie automatically on every `fetch()` — no token storage, no `Authorization` headers, no client-side auth state beyond "did `/api/me` return 200 or 401." `requireAuth` (in `auth.js`) returns a JSON 401 for `/api/*` paths and a redirect for everything else, so the same middleware protects both the API and any lingering HTML routes.
 
@@ -46,7 +48,7 @@ All under `requireAuth`, all JSON, all same-origin (no CORS config needed):
 - `PATCH /api/agents/me/status` `{ status }` → self-service presence toggle, matched by `req.user.email` against `agents.email`
 - `GET /api/ivr-options`, `POST /api/ivr-options`, `PATCH/DELETE /api/ivr-options/:digit` → IVR menu CRUD (`digit`, `label`, `response_message`, `action`)
 
-Placing an outbound call reuses the **existing** `POST /call` endpoint (`outbound.js`) directly. There's no separate admin role yet — any authenticated `@chumz.io` user can manage agents and the IVR menu, same as every other route on this app.
+Placing an outbound call reuses the **existing** `POST /call` endpoint (`outbound.js`) directly. There's no separate admin role yet — any authenticated user (any Google account, see Auth above) can manage agents and the IVR menu, same as every other route on this app.
 
 **Assumptions to verify**:
 - "incoming" vs "outgoing" is inferred from the `direction` field Africa's Talking sends on `/events` (`'Outbound'` → outgoing, anything else → incoming), and "missed" is `status === 'failed'`. IVR-originated rows don't get a `direction` until the first `/events` callback lands. This is a v1 heuristic — confirm against real traffic, same caveat as the earlier `agent_number` tagging.
@@ -84,7 +86,7 @@ Buttons, form inputs, modals, and toasts are plain CSS classes (`.btn`, `.modal`
 2. **Archive call logs** — `archived` flag + retention action.
 3. **Call transfer / conference** — needs a research spike into what Africa's Talking's Voice API actually supports for mid-call control before committing to an approach. Don't build this against a guessed API shape.
 4. **Retire `dashboard.js`** — once the React app covers everything it does, delete the HTML version rather than maintaining two dashboards. It's currently out of sync with the new Agents/IVR data model (it still shows agent phone numbers with no way to edit them), so don't treat it as a fallback if the React app has issues — fix forward instead.
-5. **Role-based permissions** — right now every `@chumz.io` login can edit agents and the IVR menu. Fine for a small team; revisit if that stops being true.
+5. **Access control** — login is currently open to any Google account with no allowlist (see Auth above); revisit this once real usage clarifies who actually needs access.
 6. **UI polish** — once the above land and real usage surfaces what's actually clunky.
 
 ## Verification
