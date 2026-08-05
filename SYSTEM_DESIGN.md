@@ -1,100 +1,91 @@
-# Chumz Call Center — React Web App System Design
+# Chumz Call Center — System Design
 
-## Context
-
-The Chumz support tool started as an Africa's Talking IVR (`app.js`) with a server-rendered HTML dashboard (`dashboard.js`) — strings of markup built in Node. The team's other products are built in React, so the natural next step is to rebuild the dashboard as a proper React single-page app instead of hand-built HTML strings, and to give it the bigger feature set already scoped (call visibility, live queue, agent management, IVR editing, analytics, archiving, transfer).
-
-**Principle for this whole effort: don't touch what works.** Africa's Talking's webhook contract (`/voice`, `/ivr`, `/handle-input`, `/events`) is unchanged — same URLs, same XML shape, same behavior on deploy day. What changed under the hood: `/ivr` and `/handle-input` now read the menu text and agent list from Supabase (`ivr_options`, `agents`) instead of hardcoded strings/arrays, so they're editable from the React app without a code deploy. The React app replaces `dashboard.js`'s *rendering*, talking to a new JSON API instead.
+This describes the system as it exists today, not a history of how it got here. See git history / commit messages for that.
 
 ## Architecture
 
 ```
-Africa's Talking ──► app.js (Express, unchanged)  ──► Supabase (call_logs)
+Africa's Talking ──► app.js (Express)  ──► Supabase (call_logs, agents, ivr_options, ivr_config)
    (voice webhooks)         │
-                             ├── api.js      (JSON API, new)
-                             ├── auth.js     (Google SSO, cookie session)
-                             └── /web/dist   (React SPA, served as static files)
-
-Browser ──► GET /  (or any non-API route) → React SPA (client-side routing)
-        ──► GET /api/*                     → JSON, cookie-authenticated
+                             ├── api.js      JSON API for the React app
+                             ├── auth.js     Google SSO + role resolution
+                             ├── outbound.js manual outbound dialing (/call)
+                             └── /web/dist   React SPA, served as static files at /app
 ```
 
-One Express process serves everything — the React app is built (`vite build`) into static files and served by the same server that already runs the IVR and API, so there's no separate hosting/CORS setup and the existing Google SSO cookie just works across the whole app (same origin). `dashboard.js` (the old HTML version) can be deleted once the React app covers its functionality; it's left in place for now so nothing breaks mid-migration.
+One Express process serves everything. The React app is built (`vite build` in `/web`) into static files served at `/app`; there is no separate hosting or CORS configuration since it's all one origin. `/` is a plain-text health check for Render — it is deliberately not the SPA's route, since Render's health check may depend on that exact response.
 
-No new database is introduced. `call_logs` (plus `ticket_status`/`agent_number` from the earlier dashboard-upgrade migration) remains the single source of truth.
+`call_logs`, `agents`, `ivr_options`, and `ivr_config` (Supabase/Postgres) are the entire data model. No other database or external state store is involved. Schema changes live in `at-voice-app/migrations/*.sql`, numbered and applied in order — every one is idempotent (safe to re-run), which matters since there's no migration-runner tooling, just the Supabase SQL editor.
 
-## Auth
+## Auth & roles
 
-Same Google SSO already built for the HTML dashboard, unchanged:
-- `GET /login` → "Sign in with Google"
-- `GET /auth/google` → redirect to Google
-- `GET /auth/google/callback` → verifies the ID token, sets an `httpOnly` session cookie, redirects to `/`
-- `GET /logout` → clears the cookie
+Google OAuth (`auth.js`), open to **any** Google account — there is no domain or email allowlist. This is a deliberate tradeoff (see the file's own comment for the reasoning) traded off against role-based access: what an authenticated user can *do* depends on whether their email matches an `agents` row and what `role` it has.
 
-**Login is open to any Google account** — the original `@chumz.io`-only restriction was removed on 2026-08-05, a deliberate call, not a bug. Anyone who reaches `/login` and completes Google sign-in gets full access: call logs (customer phone numbers), agent management, the IVR editor, and the dialer (real, billed calls). If that stops being acceptable, `auth.js`'s callback is where an allowlist check would go back in — see the comment there.
+- Session: a JWT in an `httpOnly` cookie, containing `{ email, name, role, agentId }`. `role` and `agentId` are resolved from `agents` at login time (an unrecognized email defaults to `role: 'agent'`, the more restricted tier) — they do **not** update until the next login, so promoting someone to supervisor needs them to log out/in or wait out the 7-day token expiry.
+- `requireAuth` (in `auth.js`): valid session required. Used on everything except the Africa's Talking webhooks (`/voice`, `/ivr`, `/handle-input`, `/events`), which must stay open for AT's servers to reach.
+- `requireSupervisor`: `requireAuth` plus `role === 'supervisor'`. Gates the entire agent roster and IVR configuration API (`/api/agents`, `/api/agents/:id`, `/api/ivr-options*`, `/api/ivr-config`) — reads included, not just writes, so there's one boundary to reason about rather than a per-route judgment call. Two routes are intentionally **not** supervisor-gated despite living under `/api/agents/*`: `/api/agents/stats` (any agent needs their own numbers for the Dashboard) and `/api/agents/me/status` (self-service presence toggle) — both return/act on data scoped enough that a plain agent seeing them isn't a roster leak.
 
-Because the React app is served from the same origin as the API, the browser sends the session cookie automatically on every `fetch()` — no token storage, no `Authorization` headers, no client-side auth state beyond "did `/api/me` return 200 or 401." `requireAuth` (in `auth.js`) returns a JSON 401 for `/api/*` paths and a redirect for everything else, so the same middleware protects both the API and any lingering HTML routes.
+## Data model
 
-## API contract (`api.js`)
+- **`call_logs`**: one row per call (or call leg — see below), keyed by Africa's Talking's `session_id`. Written by the IVR webhooks and `/events`; read by the Calls/Dashboard pages.
+- **`agents`**: `id, name, phone, email, status ('available' | 'on_call' | 'offline'), role ('agent' | 'supervisor')`. `status` is set two ways: manually (the presence toggle) and automatically (`/events` flips an agent to `on_call` when their leg goes `ongoing`, back to `available` when it ends — see Call routing below). `email` is optional; when set, it links a Google login to this row for self-service status and role resolution.
+- **`ivr_options`**: one row per menu digit (`digit, label, response_message, action`). `action` is one of `message` (just says `response_message`), `transfer_agent` (dials available agents), `repeat_menu` (redirects back to `/ivr`).
+- **`ivr_config`**: single row (`id = 1`) holding the greeting line spoken before the per-digit menu.
 
-All under `requireAuth`, all JSON, all same-origin (no CORS config needed):
+## Call routing
 
-- `GET /api/me` → `{ user: { email, name } }`
-- `GET /api/calls?tab=all|incoming|outgoing|missed&option=&status=&ticket=&caller=&from=&to=` → `{ calls: [...], summary: { total, login, deposit, agentRequests, missed } }`
-- `GET /api/calls/live` → in-flight calls (`ivr_started` / `input_received` / `ongoing`) — the "who's on queue" view
-- `GET /api/agents/stats` → `[{ agent, total, answered, missed, avgHandleTime }]`
-- `POST /api/calls/:sessionId/ticket` `{ ticket_status }` → updates ticket status
-- `GET/POST /api/agents`, `PATCH/DELETE /api/agents/:id` → agent CRUD (`name`, `phone`, `email`, `status`)
-- `PATCH /api/agents/me/status` `{ status }` → self-service presence toggle, matched by `req.user.email` against `agents.email`
-- `GET /api/ivr-options`, `POST /api/ivr-options`, `PATCH/DELETE /api/ivr-options/:digit` → IVR menu CRUD (`digit`, `label`, `response_message`, `action`)
+Inbound: `/voice` → `/ivr` (builds the menu from `ivr_config` + `ivr_options`, live) → `/handle-input` (branches on the pressed digit's `action`).
 
-Placing an outbound call reuses the **existing** `POST /call` endpoint (`outbound.js`) directly. There's no separate admin role yet — any authenticated user (any Google account, see Auth above) can manage agents and the IVR menu, same as every other route on this app.
+For `transfer_agent`: every currently-`available` agent is rung **simultaneously** — `<Dial phoneNumbers="+254...,+254...,..." sequential="false" .../>`, not one after another. With sequential dialing, N agents means up to N × 15s of pure ringing before a caller reaches anyone; ring-all fixes that with no schema change. First agent to pick up gets the call.
 
-**Assumptions to verify**:
-- "incoming" vs "outgoing" is inferred from the `direction` field Africa's Talking sends on `/events` (`'Outbound'` → outgoing, anything else → incoming), and "missed" is `status === 'failed'`. IVR-originated rows don't get a `direction` until the first `/events` callback lands. This is a v1 heuristic — confirm against real traffic, same caveat as the earlier `agent_number` tagging.
-- Agent-transfer calls now dial every agent with `status = 'available'`, in `id` order, exactly like the old hardcoded two-number list — but with however many agents exist, not just two. Load-test with more than two available agents before relying on it for a busy period; the sequential `<Dial>...<Say>...<Dial>` XML chain hasn't been tried past two.
+`/events` (Africa's Talking's call-state webhook) does three things per call-state change: updates `call_logs.status`, tags agent-leg events with `agent_number` for stats, and auto-flips that agent's `status` between `available`/`on_call` so a second overlapping call doesn't also ring someone already on a call. It looks up agent phone numbers through an in-memory cache (`lib/agentCache.js`, 30s TTL, invalidated on agent create/update/delete) rather than querying Supabase on every single webhook.
+
+**Two unverified assumptions, flagged deliberately**: (1) the exact Africa's Talking payload field used to detect an agent leg (`destinationNumber`) — confirm against the `📡 EVENT` log on a live agent-transfer call; (2) `direction`-based incoming/outgoing classification in the API (`'Outbound'` → outgoing, else incoming) — IVR-originated rows don't get a `direction` until the first `/events` callback lands, so a call that's still ringing may briefly classify as neither cleanly.
+
+## Phone number handling
+
+Shared in `at-voice-app/lib/phone.js`: general E.164 validation (`+` followed by 8–15 digits) rather than Kenya-only, used by `outbound.js` and `api.js`. A bare local-format number (`0712345678`) is still assumed to be Kenya (+254) when normalized — that assumption will need a country hint once a second market is added (see Future work).
 
 ## React app (`/web`)
 
-**Stack**: Vite + React + TypeScript + React Router. Vite over Create React App (unmaintained) or Next.js (its server-rendering/routing conventions solve problems this app doesn't have, since Express already serves everything from one origin). Plain `fetch` + a thin API client — no React Query/SWR yet; add one only once the number of data-fetching call sites actually justifies it.
+Vite + React + TypeScript + React Router + TanStack Query (`@tanstack/react-query` — `useQuery` for reads with built-in polling via `refetchInterval`, `useMutation` + query invalidation for writes, replacing hand-rolled `useEffect`/`useState` data-fetching).
 
-### Pages (v1)
+**Layout**: a fixed sidebar (`components/layout/Sidebar.tsx`) + topbar (`Topbar.tsx`), composed in `Layout.tsx`. Sidebar nav is role-aware — Agents/IVR links only render for supervisors (`useAuth().isSupervisor`), and the routes themselves are wrapped in a `RequireSupervisor` guard in `App.tsx` as defense in depth beyond the hidden nav link (the real boundary is server-side, per Auth & roles above).
 
-- `/` (Dashboard) — summary cards (`/api/calls`) + "Live now" section (`/api/calls/live`), polling every 10s like the current HTML dashboard
-- `/calls` — tabbed list (All / Incoming / Outgoing / Missed), click a row to change its ticket status
-- `/dialer` — phone input + call button, posts to `/call`
-- `/agents` — **Team** (add/edit/remove agents, toggle presence — this is what call routing dials) + **Performance** (the stats table from `/api/agents/stats`)
-- `/ivr` — the live IVR menu: one row per digit, editable label/message/action, add/remove digits entirely
+**Pages** (`pages/*`, code-split via `React.lazy`):
+- `/` Dashboard — KPI cards, a live-calls panel, and either a supervisor leaderboard or an individual agent's own performance card (matched via the JWT's `agentId`).
+- `/calls` — tabbed call list (All/Incoming/Outgoing/Missed) with inline ticket-status editing.
+- `/agents` (supervisors only) — team roster as a card grid (presence toggle, add/edit/delete, role field) plus the performance table.
+- `/ivr` (supervisors only) — editable greeting + per-digit menu options, with a live "call flow preview" rendering what a caller will actually hear.
 
-### Structure
+**Widgets** (`components/widgets/*`), present on every page via `Layout`: a floating quick-dial FAB (posts to `/call`) and a floating "Live Analytics" popover (today's summary, fetched on demand).
 
-- `web/src/lib/api.ts` — thin `fetch` wrapper (`credentials: 'include'` so the cookie rides along; redirects to `/login` on 401; parses `{ error }` JSON bodies into a clean `ApiError.message`)
-- `web/src/lib/auth.tsx` — a context that calls `/api/me` on load to know if anyone's signed in, exposes `user`
-- `web/src/lib/toast.tsx` — app-wide toast notifications (`useToast()`) for save/error feedback, since silent saves (or a bare `alert()`) don't feel like a real product
-- `web/src/pages/*` — one file per page above
-- `web/src/components/*` — `StatusPill` (color-coded status/ticket/presence badge, one visual language across every page) and `ConfirmDialog` (used before every destructive action — deleting an agent or an IVR option). Pulled out once two pages needed the same thing, not built speculatively upfront.
+**Cross-cutting** (`lib/*`): `api.ts` (fetch wrapper — `credentials: 'include'` so the session cookie rides along, redirects to `/login` on 401, parses `{error}` JSON bodies into a clean `ApiError`), `auth.tsx` (current user + role), `theme.tsx` (dark mode, persisted to `localStorage`, recolors the shell/topbar only — card surfaces stay light by design, not yet extended further), `toast.tsx` (transient notifications), `useModalA11y.ts` (shared focus-trap + Escape-to-close for every modal).
 
-Buttons, form inputs, modals, and toasts are plain CSS classes (`.btn`, `.modal`, `.toast`, etc. in `styles.css`) rather than React component wrappers — there's no shared *behavior* beyond styling yet, so a component would just be indirection. Worth revisiting once (if) the styling itself needs to vary by context.
+**Tooling**: ESLint (`eslint.config.js`, flat config) + Prettier for consistency; Vitest + React Testing Library for tests, currently covering the phone-format helpers and the API client's error-parsing logic — the cheap, high-value wins, not full coverage.
 
-## What's built vs. deferred
+## Scalability notes
 
-**Built now**: the full JSON API above, and all six pages/routes, wired to real data — including agent presence (which now actually drives who gets dialed) and a live IVR editor (which now actually drives what callers hear).
+- **Ring-all dialing** (above) removes the main caller-facing bottleneck without any new infrastructure.
+- **Agent-phone caching** removes a full-table query from the hottest webhook path (`/events`, called on every call-state change).
+- **Known limitation**: the agent-phone cache is in-process. If this is ever scaled beyond one Render instance, each instance's cache can drift from the others for up to its TTL. Not a real concern at today's scale; a shared cache (Redis) is the fix if it ever becomes one.
+- **Known limitation**: `/api/calls` has no pagination (`.limit(200)`). Fine today; will need cursor-based pagination once call history grows.
+- **Known limitation**: no push layer — Dashboard/Calls poll every 10s via React Query's `refetchInterval`. Adequate for a handful of concurrent agents. A real push layer (Express subscribing to Supabase Realtime server-side, relaying to browsers over SSE — no client-side Supabase credentials or RLS changes needed) is a bigger, separate change.
+- **Known limitation**: no rate limiting on `/call` (outbound dialing) beyond requiring login — a compromised session or frontend bug could run up real Africa's Talking charges.
 
-**Deferred, in the order I'd tackle them next** (each still needs its own scoping pass before building, same as the SSO phase):
+## What's deliberately not built
 
-1. **Agent analytics** — trend charts on top of `/api/agents/stats`.
-2. **Archive call logs** — `archived` flag + retention action.
-3. **Call transfer / conference** — needs a research spike into what Africa's Talking's Voice API actually supports for mid-call control before committing to an approach. Don't build this against a guessed API shape.
-4. **Retire `dashboard.js`** — once the React app covers everything it does, delete the HTML version rather than maintaining two dashboards. It's currently out of sync with the new Agents/IVR data model (it still shows agent phone numbers with no way to edit them), so don't treat it as a fallback if the React app has issues — fix forward instead.
-5. **Access control** — login is currently open to any Google account with no allowlist (see Auth above); revisit this once real usage clarifies who actually needs access.
-6. **UI polish** — once the above land and real usage surfaces what's actually clunky.
+1. **Tickets as a full entity** (tags, priority, assignee, notes) — today's `call_logs.ticket_status` is a single enum, not a separate ticket record.
+2. **Call forwarding rules** — no such feature exists; needs decisions on what "destinations" and "after hours" mean.
+3. **Real live-queue "Answer"** — Africa's Talking's `<Enqueue>`/`<Dequeue>` actions (confirmed to exist, see [AT Voice docs](https://developers.africastalking.com/docs/voice/actions/call_queue)) would let an agent claim a specific waiting caller onto their real phone, without a WebRTC/softphone project. Exact mechanics unverified against a live sandbox.
+4. **Multi-country (Rwanda)**: confirmed one Africa's Talking account/credential set covers every market they operate in — Rwanda just needs a second Voice-enabled number under the same account. Not yet built: a `country` column on `agents`/`ivr_options`, and a way to resolve which country an inbound call belongs to (likely a destination-number field on the `/voice`/`/ivr` webhook — unverified which one). Phone validation is already general enough (see above) not to block this.
+5. **Redis/shared caching, pagination, push updates, rate limiting** — see Scalability notes above.
 
 ## Verification
 
-I could not run `npm install`, `node`, or the Vite dev server in this environment (no Node available), so none of this has been executed — only reviewed by hand. When you're back:
-
-1. **Run the migrations in order** — `001_call_logs_base.sql`, then `002_dashboard_upgrades.sql`, then `003_agents_and_ivr.sql` — in the Supabase SQL editor, against whichever project `SUPABASE_URL`/`SUPABASE_KEY` actually point to on Render. All three are idempotent (safe to re-run), which matters if you're ever unsure what's already been applied. `001` documents the base `call_logs` schema that predates this repo — if you ever see errors like `column call_logs.status does not exist` or `table 'agents' not found`, that's this migration (or `003`) never having been run against the connected database; run them and it resolves. `003` also seeds `agents`/`ivr_options` with the two phone numbers and four menu options that were previously hardcoded, so the IVR says/does the same thing after migrating as it did before — edit those seeded rows (real agent names/emails, menu wording) from the new `/agents` and `/ivr` pages once it's live.
-2. **Backend**: `cd at-voice-app && npm install && npm start` locally with your Supabase env vars, then hit `/login` → complete the Google flow → confirm `/api/me`, `/api/calls`, `/api/calls/live`, `/api/agents`, `/api/agents/stats`, `/api/ivr-options` all return sane JSON with the session cookie attached.
-3. **Frontend**: see `web/README.md` for exact install steps. I hand-wrote `web/package.json` without being able to run npm's own resolver, so treat versions there as a starting point — run `npm install` and let it correct anything that doesn't resolve, and use `npm run build` to confirm the production build (the thing Express actually serves) works, not just `npm run dev`.
-4. Confirm the AT webhooks (`/voice`, `/ivr`, `/handle-input`, `/events`) still respond without auth, and that a real call through the "speak to an agent" option still reaches a phone — the sequential `<Dial>` chain is now built from however many `agents` rows are `available` instead of a fixed two, and that path can only really be checked with a live test call.
-5. In `/agents`, toggle an agent to "available"/"offline" and confirm it's reflected on the next test call (available agents get dialed, offline ones don't). In `/ivr`, edit a menu option's wording and confirm the next call's `<Say>` reflects it.
+No Node available in the environment these changes were authored in, so nothing has been executed — only reviewed by hand.
+1. Run every file in `migrations/` in order (all idempotent) against the Supabase project your Render env vars actually point to.
+2. `npm install && npm start` in `at-voice-app/`; `npm install && npm run build` in `web/` (check `npm run lint` / `npm test` too — this is the first time those scripts exist, so treat a clean run as itself a thing to verify).
+3. Confirm `/voice`, `/ivr`, `/handle-input`, `/events` still respond without auth.
+4. Log in with an account not linked to any `agents` row — confirm Agents/IVR are hidden and return 403 if visited directly. Then set that email's `role` to `supervisor` directly in Supabase, log out/in, confirm access.
+5. Place a real test call requesting an agent with 2+ agents marked `available` — confirm their phones ring simultaneously, and that the answering agent's row flips to `on_call` during the call and back after.

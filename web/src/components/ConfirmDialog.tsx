@@ -1,3 +1,5 @@
+import { useModalA11y } from '../lib/useModalA11y';
+
 type ConfirmDialogProps = {
     open: boolean;
     title: string;
@@ -17,11 +19,20 @@ export default function ConfirmDialog({
     onConfirm,
     onCancel
 }: ConfirmDialogProps) {
+    const containerRef = useModalA11y(open, onCancel);
+
     if (!open) return null;
 
     return (
         <div className="modal-overlay" onClick={onCancel}>
-            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" onClick={e => e.stopPropagation()}>
+            <div
+                ref={containerRef}
+                className="modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="confirm-title"
+                onClick={e => e.stopPropagation()}
+            >
                 <h3 id="confirm-title">{title}</h3>
                 <p>{message}</p>
                 <div className="modal-actions">

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
+import { useModalA11y } from '../lib/useModalA11y';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 type IvrOption = {
@@ -18,23 +20,79 @@ const ACTIONS: { value: IvrOption['action']; label: string }[] = [
 
 const EMPTY_FORM = { digit: '', label: '', response_message: '', action: 'message' as IvrOption['action'] };
 
+function errorMessage(err: unknown) {
+    return err instanceof Error ? err.message : 'Something went wrong';
+}
+
 export default function IvrEditor() {
-    const [options, setOptions] = useState<IvrOption[]>([]);
+    const queryClient = useQueryClient();
+    const showToast = useToast();
+
+    const { data: greetingData } = useQuery({ queryKey: ['ivr-config'], queryFn: () => apiFetch('/api/ivr-config') });
+    const { data: optionsData } = useQuery({ queryKey: ['ivr-options'], queryFn: () => apiFetch('/api/ivr-options') });
+
+    const options: IvrOption[] = optionsData?.options ?? [];
+
+    const [greeting, setGreeting] = useState('');
     const [drafts, setDrafts] = useState<Record<string, IvrOption>>({});
     const [addOpen, setAddOpen] = useState(false);
     const [addForm, setAddForm] = useState(EMPTY_FORM);
     const [addError, setAddError] = useState('');
     const [pendingDelete, setPendingDelete] = useState<IvrOption | null>(null);
-    const showToast = useToast();
 
-    function load() {
-        apiFetch('/api/ivr-options').then(data => {
-            setOptions(data.options);
-            setDrafts(Object.fromEntries(data.options.map((o: IvrOption) => [o.digit, o])));
-        }).catch(() => {});
+    useEffect(() => {
+        if (greetingData?.greeting !== undefined) setGreeting(greetingData.greeting);
+    }, [greetingData?.greeting]);
+
+    useEffect(() => {
+        setDrafts(Object.fromEntries(options.map(o => [o.digit, o])));
+    }, [optionsData]);
+
+    function invalidateOptions() {
+        queryClient.invalidateQueries({ queryKey: ['ivr-options'] });
     }
 
-    useEffect(load, []);
+    const saveGreeting = useMutation({
+        mutationFn: () => apiFetch('/api/ivr-config', { method: 'PATCH', body: JSON.stringify({ greeting }) }),
+        onSuccess: () => showToast('Greeting saved'),
+        onError: (err: unknown) => showToast(errorMessage(err), 'error')
+    });
+
+    const saveOption = useMutation({
+        mutationFn: (digit: string) => {
+            const draft = drafts[digit];
+            return apiFetch(`/api/ivr-options/${digit}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ label: draft.label, response_message: draft.response_message, action: draft.action })
+            });
+        },
+        onSuccess: (_data, digit) => {
+            showToast(`Option ${digit} saved`);
+            invalidateOptions();
+        },
+        onError: (err: unknown) => showToast(errorMessage(err), 'error')
+    });
+
+    const deleteOption = useMutation({
+        mutationFn: (digit: string) => apiFetch(`/api/ivr-options/${digit}`, { method: 'DELETE' }),
+        onSuccess: (_data, digit) => {
+            showToast(`Option ${digit} removed`);
+            invalidateOptions();
+        },
+        onError: (err: unknown) => showToast(errorMessage(err), 'error'),
+        onSettled: () => setPendingDelete(null)
+    });
+
+    const addOption = useMutation({
+        mutationFn: () => apiFetch('/api/ivr-options', { method: 'POST', body: JSON.stringify(addForm) }),
+        onSuccess: () => {
+            showToast(`Option ${addForm.digit} added`);
+            setAddOpen(false);
+            setAddForm(EMPTY_FORM);
+            invalidateOptions();
+        },
+        onError: (err: unknown) => setAddError(errorMessage(err))
+    });
 
     function updateDraft(digit: string, changes: Partial<IvrOption>) {
         setDrafts(current => ({ ...current, [digit]: { ...current[digit], ...changes } }));
@@ -44,113 +102,107 @@ export default function IvrEditor() {
         const original = options.find(o => o.digit === digit);
         const draft = drafts[digit];
         if (!original || !draft) return false;
-        return original.label !== draft.label || original.response_message !== draft.response_message || original.action !== draft.action;
+        return (
+            original.label !== draft.label ||
+            original.response_message !== draft.response_message ||
+            original.action !== draft.action
+        );
     }
 
-    async function saveRow(digit: string) {
-        const draft = drafts[digit];
-        try {
-            await apiFetch(`/api/ivr-options/${digit}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ label: draft.label, response_message: draft.response_message, action: draft.action })
-            });
-            showToast(`Option ${digit} saved`);
-            load();
-        } catch (err: any) {
-            showToast(err.message || 'Failed to save', 'error');
-        }
-    }
-
-    async function confirmDelete() {
-        if (!pendingDelete) return;
-        try {
-            await apiFetch(`/api/ivr-options/${pendingDelete.digit}`, { method: 'DELETE' });
-            showToast(`Option ${pendingDelete.digit} removed`);
-            load();
-        } catch (err: any) {
-            showToast(err.message || 'Failed to remove', 'error');
-        } finally {
-            setPendingDelete(null);
-        }
-    }
-
-    async function saveNew() {
-        setAddError('');
-        try {
-            await apiFetch('/api/ivr-options', { method: 'POST', body: JSON.stringify(addForm) });
-            showToast(`Option ${addForm.digit} added`);
-            setAddOpen(false);
-            setAddForm(EMPTY_FORM);
-            load();
-        } catch (err: any) {
-            setAddError(err.message || 'Something went wrong');
-        }
-    }
+    const addModalRef = useModalA11y(addOpen, () => setAddOpen(false));
 
     return (
-        <div>
-            <div className="panel">
-                <div className="panel-header">
-                    <h3>☎️ IVR Menu</h3>
-                    <button className="btn btn-primary" onClick={() => setAddOpen(true)}>+ Add Option</button>
+        <div className="ivr-layout">
+            <div>
+                <div className="panel">
+                    <h3>Greeting message</h3>
+                    <textarea value={greeting} onChange={e => setGreeting(e.target.value)} rows={2} />
+                    <div className="modal-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }}>
+                        <button
+                            className="btn btn-primary"
+                            onClick={() => saveGreeting.mutate()}
+                            disabled={saveGreeting.isPending || greeting === greetingData?.greeting}
+                        >
+                            Save greeting
+                        </button>
+                    </div>
                 </div>
-                <p className="hint">
-                    This is exactly what callers hear when they dial in — edits take effect on the next call, no deploy needed.
-                </p>
 
-                {options.map(option => {
-                    const draft = drafts[option.digit] ?? option;
-                    return (
-                        <div className="ivr-row" key={option.digit}>
-                            <div className="ivr-row-digit">{option.digit}</div>
-                            <div className="ivr-row-fields">
-                                <label>
-                                    Label (shown as "Press {option.digit} for ___")
-                                    <input
-                                        value={draft.label}
-                                        onChange={e => updateDraft(option.digit, { label: e.target.value })}
-                                    />
-                                </label>
-                                <label>
-                                    Action
-                                    <select
-                                        value={draft.action}
-                                        onChange={e => updateDraft(option.digit, { action: e.target.value as IvrOption['action'] })}
-                                    >
-                                        {ACTIONS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-                                    </select>
-                                </label>
-                                {draft.action !== 'repeat_menu' && (
+                <div className="panel">
+                    <div className="panel-header">
+                        <h3>Menu options</h3>
+                        <button className="btn btn-primary" onClick={() => setAddOpen(true)}>+ Add option</button>
+                    </div>
+                    <p className="hint">This is exactly what callers hear — edits take effect on the next call.</p>
+
+                    {options.map(option => {
+                        const draft = drafts[option.digit] ?? option;
+                        return (
+                            <div className="ivr-row" key={option.digit}>
+                                <div className="ivr-row-digit">{option.digit}</div>
+                                <div className="ivr-row-fields">
                                     <label>
-                                        {draft.action === 'transfer_agent' ? 'Message before transferring' : 'Response message'}
-                                        <textarea
-                                            value={draft.response_message ?? ''}
-                                            onChange={e => updateDraft(option.digit, { response_message: e.target.value })}
-                                            rows={2}
+                                        Label (shown as &quot;Press {option.digit} for ___&quot;)
+                                        <input
+                                            value={draft.label}
+                                            onChange={e => updateDraft(option.digit, { label: e.target.value })}
                                         />
                                     </label>
-                                )}
+                                    <label>
+                                        Action
+                                        <select
+                                            value={draft.action}
+                                            onChange={e => updateDraft(option.digit, { action: e.target.value as IvrOption['action'] })}
+                                        >
+                                            {ACTIONS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                                        </select>
+                                    </label>
+                                    {draft.action !== 'repeat_menu' && (
+                                        <label>
+                                            {draft.action === 'transfer_agent' ? 'Message before transferring' : 'Response message'}
+                                            <textarea
+                                                value={draft.response_message ?? ''}
+                                                onChange={e => updateDraft(option.digit, { response_message: e.target.value })}
+                                                rows={2}
+                                            />
+                                        </label>
+                                    )}
+                                </div>
+                                <div className="ivr-row-actions">
+                                    <button
+                                        className="btn btn-primary"
+                                        disabled={!isDirty(option.digit) || saveOption.isPending}
+                                        onClick={() => saveOption.mutate(option.digit)}
+                                    >
+                                        Save
+                                    </button>
+                                    <button className="btn btn-link btn-link-danger" onClick={() => setPendingDelete(option)}>
+                                        Delete
+                                    </button>
+                                </div>
                             </div>
-                            <div className="ivr-row-actions">
-                                <button
-                                    className="btn btn-primary"
-                                    disabled={!isDirty(option.digit)}
-                                    onClick={() => saveRow(option.digit)}
-                                >
-                                    Save
-                                </button>
-                                <button className="btn btn-link btn-link-danger" onClick={() => setPendingDelete(option)}>
-                                    Delete
-                                </button>
-                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className="panel">
+                <h3>Call flow preview</h3>
+                <div className="ivr-preview-greeting">&quot;{greeting} {options.map(o => `Press ${o.digit} for ${o.label}.`).join(' ')}&quot;</div>
+                {options.map(o => (
+                    <div className="ivr-preview-step" key={o.digit}>
+                        <div className="ivr-preview-key">{o.digit}</div>
+                        <div className="ivr-preview-text">
+                            <strong>{o.label}</strong>
+                            {ACTIONS.find(a => a.value === o.action)?.label}
                         </div>
-                    );
-                })}
+                    </div>
+                ))}
             </div>
 
             {addOpen && (
                 <div className="modal-overlay" onClick={() => setAddOpen(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
+                    <div ref={addModalRef} className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
                         <h3>Add IVR Option</h3>
 
                         <label>
@@ -189,7 +241,9 @@ export default function IvrEditor() {
 
                         <div className="modal-actions">
                             <button className="btn btn-secondary" onClick={() => setAddOpen(false)}>Cancel</button>
-                            <button className="btn btn-primary" onClick={saveNew}>Add</button>
+                            <button className="btn btn-primary" onClick={() => addOption.mutate()} disabled={addOption.isPending}>
+                                Add
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -201,7 +255,7 @@ export default function IvrEditor() {
                 message={`Remove option ${pendingDelete?.digit} ("${pendingDelete?.label}")? Callers who press ${pendingDelete?.digit} will hear "Invalid input" until you add another.`}
                 confirmLabel="Remove"
                 danger
-                onConfirm={confirmDelete}
+                onConfirm={() => pendingDelete && deleteOption.mutate(pendingDelete.digit)}
                 onCancel={() => setPendingDelete(null)}
             />
         </div>

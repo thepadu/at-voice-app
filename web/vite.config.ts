@@ -1,10 +1,11 @@
-import { defineConfig } from 'vite';
+/// <reference types="vitest/config" />
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // base: '/app/' because Express serves this build under /app (see app.js) —
-// dashboard.js keeps serving the old HTML pages at '/' and '/dashboard' in
-// the meantime, so this app lives at a separate path rather than replacing
-// them outright.
+// dashboard.js has been retired, so the old HTML dashboard no longer
+// competes for a URL, but the SPA stays at /app rather than / since / is a
+// plain-text health check Render may depend on.
 export default defineConfig({
     plugins: [react()],
     base: '/app/',
@@ -22,5 +23,10 @@ export default defineConfig({
             '/auth': 'http://localhost:3000',
             '/logout': 'http://localhost:3000'
         }
+    },
+    test: {
+        environment: 'jsdom',
+        globals: true,
+        setupFiles: './src/test/setup.ts'
     }
 });

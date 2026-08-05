@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { apiFetch } from './api';
 
-type User = { email: string; name: string };
+type Role = 'agent' | 'supervisor';
+type User = { email: string; name: string; role: Role; agentId: number | null };
 
-const AuthContext = createContext<{ user: User | null; loading: boolean }>({
+const AuthContext = createContext<{ user: User | null; loading: boolean; isSupervisor: boolean }>({
     user: null,
-    loading: true
+    loading: true,
+    isSupervisor: false
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -19,7 +21,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .finally(() => setLoading(false));
     }, []);
 
-    return <AuthContext.Provider value={{ user, loading }}>{children}</AuthContext.Provider>;
+    return (
+        <AuthContext.Provider value={{ user, loading, isSupervisor: user?.role === 'supervisor' }}>
+            {children}
+        </AuthContext.Provider>
+    );
 }
 
 export function useAuth() {

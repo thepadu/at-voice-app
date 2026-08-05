@@ -4,9 +4,11 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
+const { normalizePhone } = require('./lib/phone');
+const { getAgentPhones } = require('./lib/agentCache');
+
 const authRoutes = require('./auth');
 const apiRoutes = require('./api');
-const dashboardRoutes = require('./dashboard');
 const outboundRoutes = require('./outbound');
 
 const app = express();
@@ -20,14 +22,25 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
-const requireAuth = authRoutes(app);
+const { requireAuth, requireSupervisor } = authRoutes(app, supabase);
 
 const IVR_TIMEOUT = 7;
 
 // 🔧 IVR menu + agent list are dashboard-editable (see api.js) — stored in
-// Supabase's `ivr_options` and `agents` tables (migrations/003) instead of
-// hardcoded here, so changing a prompt or adding/removing an agent doesn't
-// need a code deploy.
+// Supabase's `ivr_config`/`ivr_options` and `agents` tables (migrations
+// 003/004) instead of hardcoded here, so changing a prompt or adding an
+// agent doesn't need a code deploy.
+async function getIvrGreeting() {
+    const { data, error } = await supabase.from('ivr_config').select('greeting').eq('id', 1).single();
+
+    if (error) {
+        console.error('❌ Failed to load ivr_config:', error);
+        return 'Welcome to Chumz customer support.';
+    }
+
+    return data.greeting;
+}
+
 async function getIvrOptions() {
     const { data, error } = await supabase
         .from('ivr_options')
@@ -57,25 +70,18 @@ async function getAvailableAgents() {
     return data;
 }
 
-// 🔧 Normalize phone
-function normalizePhone(phone) {
-    if (!phone) return null;
-    phone = phone.replace(/\s+/g, '').trim();
-    if (phone.startsWith('+254')) return phone.substring(1);
-    if (phone.startsWith('0')) return '254' + phone.substring(1);
-    return phone;
-}
-
-app.locals.normalizePhone = normalizePhone;
-
 // Routes
-apiRoutes(app, supabase, requireAuth);
-dashboardRoutes(app, supabase, requireAuth);
+apiRoutes(app, supabase, requireAuth, requireSupervisor);
 outboundRoutes(app, requireAuth);
 
 // Health
 app.get('/', (req, res) => {
-    res.send('✅ choomz IVR running');
+    res.send('✅ Chumz IVR running');
+});
+
+// Old server-rendered dashboard is gone — send bookmarks to the React app.
+app.get('/dashboard', (req, res) => {
+    res.redirect('/app');
 });
 
 
@@ -91,8 +97,8 @@ app.post('/voice', (req, res) => {
 
 
 // XML-escape dynamic text before embedding it in a voice response — the IVR
-// menu text and agent list are now dashboard-editable (by any authenticated
-// @chumz.io user), so an admin typing "Terms & Conditions" shouldn't produce
+// menu text and agent list are dashboard-editable (by any authenticated
+// supervisor), so someone typing "Terms & Conditions" shouldn't produce
 // invalid XML.
 function escapeXml(value) {
     return String(value ?? '')
@@ -116,12 +122,11 @@ app.post('/ivr', async (req, res) => {
         status: 'ivr_started'
     }, { onConflict: 'session_id' });
 
-    const options = await getIvrOptions();
+    const [greeting, options] = await Promise.all([getIvrGreeting(), getIvrOptions()]);
 
     const menuText = options.length
-        ? 'Welcome to choomz customer support. ' +
-          options.map(o => `Press ${o.digit} for ${escapeXml(o.label)}.`).join(' ')
-        : 'Welcome to choomz customer support. Our menu is temporarily unavailable, please try again shortly.';
+        ? `${greeting.trim()} ` + options.map(o => `Press ${o.digit} for ${escapeXml(o.label)}.`).join(' ')
+        : `${greeting.trim()} Our menu is temporarily unavailable, please try again shortly.`;
 
     res.set('Content-Type', 'application/xml');
 
@@ -184,16 +189,16 @@ app.post('/handle-input', async (req, res) => {
                 '</Response>');
         }
 
-        let body = `<Say>${escapeXml(option.response_message)}</Say>`;
+        // Ring every available agent at once (sequential="false") instead of
+        // one-after-another — with N agents, sequential dialing means up to
+        // N × 15s of pure ringing before a caller even reaches someone.
+        // Whoever picks up first gets the call.
+        const phoneList = agents.map(a => escapeXml(a.phone)).join(',');
 
-        agents.forEach((agent, i) => {
-            body += `<Dial phoneNumbers="${escapeXml(agent.phone)}" timeout="15" record="true"/>`;
-            if (i < agents.length - 1) {
-                body += '<Say>That agent did not pick up. Proceeding to the next available agent.</Say>';
-            }
-        });
-
-        body += '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>';
+        const body =
+            `<Say>${escapeXml(option.response_message)}</Say>` +
+            `<Dial phoneNumbers="${phoneList}" sequential="false" timeout="15" record="true"/>` +
+            '<Say>All agents are currently unavailable. Please try again later. Goodbye.</Say>';
 
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' + '<Response>' + body + '</Response>');
     }
@@ -229,17 +234,28 @@ app.post('/events', async (req, res) => {
     if (isActive === '0' && durationInSeconds == 0) status = 'failed';
 
     // Dial legs to a support agent land here as their own event. We tag them
-    // with agent_number so the dashboard can compute per-agent stats.
+    // with agent_number so the dashboard can compute per-agent stats, and
+    // auto-track that agent's presence so a second, overlapping call doesn't
+    // also ring them while they're mid-call.
     // NOTE: field name/behavior assumed from AT's docs — confirm against the
     // "📡 EVENT" log on a live agent-transfer call before relying on this.
-    const { data: allAgents } = await supabase.from('agents').select('phone');
-    const agentPhones = (allAgents || []).map(a => normalizePhone(a.phone));
-    const isAgentLeg = agentPhones.includes(destination);
+    const agentPhones = await getAgentPhones(supabase, normalizePhone);
+    const matchedAgent = agentPhones.find(a => a.normalized === destination);
+
+    if (matchedAgent) {
+        if (status === 'ongoing') {
+            await supabase.from('agents').update({ status: 'on_call' })
+                .eq('phone', matchedAgent.phone).eq('status', 'available');
+        } else if (status === 'completed' || status === 'failed') {
+            await supabase.from('agents').update({ status: 'available' })
+                .eq('phone', matchedAgent.phone).eq('status', 'on_call');
+        }
+    }
 
     await supabase.from('call_logs').upsert({
         session_id: sessionId,
         caller,
-        agent_number: isAgentLeg ? destination : undefined,
+        agent_number: matchedAgent ? destination : undefined,
         status,
         duration: durationInSeconds,
         direction
@@ -272,10 +288,28 @@ app.post('/ticket/:sessionId', requireAuth, async (req, res) => {
 });
 
 
+// 🔹 CSV EXPORT
+app.get('/export', requireAuth, async (req, res) => {
+    const { data, error } = await supabase.from('call_logs').select('*');
+
+    if (error) {
+        console.error(error);
+        return res.status(500).send('Failed to export calls');
+    }
+
+    let csv = 'Caller,Issue,Status,Duration,Time,Ticket\n';
+
+    data.forEach(row => {
+        csv += `${row.caller},${row.option_pressed},${row.status || ''},${row.duration || 0},${row.created_at},${row.ticket_status || 'open'}\n`;
+    });
+
+    res.header('Content-Type', 'text/csv');
+    res.attachment('logs.csv');
+    res.send(csv);
+});
+
+
 // 🔹 REACT WEB APP (built via `npm run build` in /web, served under /app)
-// dashboard.js keeps serving the old HTML pages at '/' and '/dashboard' —
-// this lives at a separate path rather than replacing them outright, so
-// nothing breaks if the React app isn't built yet on a given deploy.
 const webBuildPath = path.join(__dirname, '..', 'web', 'dist');
 app.use('/app', express.static(webBuildPath));
 app.get(['/app', '/app/*'], (req, res) => {

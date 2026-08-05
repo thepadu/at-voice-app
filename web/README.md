@@ -1,6 +1,6 @@
 # Chumz Support — Web App
 
-React replacement for the server-rendered HTML dashboard (`dashboard.js`), talking to the JSON API in `../at-voice-app/api.js`. See `../SYSTEM_DESIGN.md` for the full architecture and reasoning.
+The React admin console, talking to the JSON API in `../at-voice-app/api.js`. See `../SYSTEM_DESIGN.md` for the full architecture and reasoning.
 
 ## ⚠️ Before you run anything
 
@@ -31,14 +31,26 @@ Vite's dev server proxies `/api`, `/call`, `/login`, `/auth`, `/logout` to `http
 
 Sign in by visiting `http://localhost:3000/login` first (this sets the session cookie), then open the Vite dev URL — the cookie is shared since both are `localhost`.
 
+## Quality checks
+
+```bash
+npm run lint     # ESLint
+npm run format   # Prettier, writes in place
+npm test         # Vitest
+```
+
+None of these have been run yet either (see the warning above) — the first run of each is itself a real test of whether the configs are sound, not just a formality.
+
 ## Production build
 
 ```bash
 npm run build
 ```
 
-Outputs to `web/dist`, which `at-voice-app/app.js` serves at `/app` (e.g. `https://at-voice-app.onrender.com/app`). On Render, you'll want a build step that runs both `npm install && npm start` in `at-voice-app/` **and** `npm install && npm run build` in `web/` before the server starts — check how Render's build command is currently configured and extend it, since right now it likely only builds the backend.
+Outputs to `web/dist`, which `at-voice-app/app.js` serves at `/app` (e.g. `https://at-voice-app.onrender.com/app`). On Render, the build command needs to install and build **both** `at-voice-app/` and `web/` — check how it's currently configured; a single-project setup will likely only build the backend.
 
-## What's here vs. not
+## What's here
 
-Built: Dashboard (summary + live calls), Calls (tabbed list + ticket status), Dialer, Agents (team management + presence toggle + performance stats), IVR editor (edit/add/remove menu options, wired live to the actual call flow). Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent straight to the existing `/login` HTML page rather than a React equivalent), or any of the remaining deferred roadmap items in `SYSTEM_DESIGN.md` (analytics charts, archiving, call transfer, role-based permissions).
+Dashboard (KPIs, live calls, supervisor leaderboard / agent's own performance), Calls (tabbed list + ticket status), a floating quick-dial widget and live-analytics popover (present on every page), Agents (supervisors only — roster management, presence toggle, roles), IVR editor (supervisors only — greeting + menu options with a live call-flow preview). Role-gated via `useAuth().isSupervisor` on the frontend and `requireSupervisor` on the backend (frontend gating is just UX — the real boundary is server-side).
+
+Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent to the existing `/login` HTML page), and the larger deferred items in `SYSTEM_DESIGN.md` (a real Tickets entity, call forwarding rules, a real live-queue "Answer", multi-country support).

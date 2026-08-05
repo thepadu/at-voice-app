@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import StatusPill from '../components/StatusPill';
 
@@ -24,21 +25,24 @@ const OPTION_LABELS: Record<string, string> = {
 
 export default function Calls() {
     const [tab, setTab] = useState<(typeof TABS)[number]>('all');
-    const [calls, setCalls] = useState<Call[]>([]);
+    const queryClient = useQueryClient();
 
-    useEffect(() => {
-        apiFetch(`/api/calls?tab=${tab}`).then(data => setCalls(data.calls)).catch(() => {});
-    }, [tab]);
+    const { data } = useQuery({
+        queryKey: ['calls', tab],
+        queryFn: () => apiFetch(`/api/calls?tab=${tab}`),
+        refetchInterval: 10000
+    });
 
-    async function updateTicket(sessionId: string, ticketStatus: string) {
-        // Optimistic update — the dropdown reflects the change immediately,
-        // matching how the old HTML dashboard's inline select behaved.
-        setCalls(calls.map(c => (c.session_id === sessionId ? { ...c, ticket_status: ticketStatus } : c)));
-        await apiFetch(`/api/calls/${sessionId}/ticket`, {
-            method: 'POST',
-            body: JSON.stringify({ ticket_status: ticketStatus })
-        });
-    }
+    const calls: Call[] = data?.calls ?? [];
+
+    const updateTicket = useMutation({
+        mutationFn: ({ sessionId, ticketStatus }: { sessionId: string; ticketStatus: string }) =>
+            apiFetch(`/api/calls/${sessionId}/ticket`, {
+                method: 'POST',
+                body: JSON.stringify({ ticket_status: ticketStatus })
+            }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['calls'] })
+    });
 
     return (
         <div>
@@ -79,7 +83,9 @@ export default function Calls() {
                             <td>
                                 <select
                                     value={call.ticket_status ?? 'open'}
-                                    onChange={e => updateTicket(call.session_id, e.target.value)}
+                                    onChange={e =>
+                                        updateTicket.mutate({ sessionId: call.session_id, ticketStatus: e.target.value })
+                                    }
                                 >
                                     {TICKET_STATUSES.map(s => (
                                         <option key={s} value={s}>{s.replace('_', ' ')}</option>

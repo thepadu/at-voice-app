@@ -1,4 +1,5 @@
 const AfricasTalking = require('africastalking');
+const { toE164, isValidE164 } = require('./lib/phone');
 
 module.exports = function (app, requireAuth) {
 
@@ -10,26 +11,6 @@ module.exports = function (app, requireAuth) {
     const voice = africastalking.VOICE;
     const AT_NUMBER = process.env.AT_VOICE_NUMBER;
 
-    // 🔧 Normalize phone to +254 format
-    function normalize(phone) {
-        if (!phone) return null;
-
-        phone = phone.replace(/\s+/g, '').trim();
-
-        if (phone.startsWith('+254')) return phone;
-
-        if (phone.startsWith('254')) return '+' + phone;
-
-        if (phone.startsWith('0')) return '+254' + phone.substring(1);
-
-        return phone;
-    }
-
-    // 🔒 Validate Kenyan mobile numbers (supports Safaricom, Airtel, new ranges)
-    function isValid(phone) {
-        return /^\+254\d{9}$/.test(phone);
-    }
-
     // 📞 CALL ROUTE (GET + POST supported)
     app.all('/call', requireAuth, async (req, res) => {
         console.log("🔥 /call route hit");
@@ -40,9 +21,9 @@ module.exports = function (app, requireAuth) {
             return res.status(400).send('Missing phone number');
         }
 
-        phone = normalize(phone);
+        phone = toE164(phone);
 
-        if (!phone || !isValid(phone)) {
+        if (!phone || !isValidE164(phone)) {
             console.log("❌ Invalid number:", phone);
             return res.status(400).send('Invalid phone number');
         }

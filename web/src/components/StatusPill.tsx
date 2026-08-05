@@ -1,5 +1,6 @@
 const COLORS: Record<string, string> = {
     available: '#10B981',
+    on_call: '#1d4ed8',
     offline: '#6B7280',
     completed: '#10B981',
     ongoing: '#3B82F6',

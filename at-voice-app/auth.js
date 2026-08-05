@@ -1,7 +1,7 @@
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
 
-module.exports = function (app) {
+module.exports = function (app, supabase) {
 
     const client = new OAuth2Client(
         process.env.GOOGLE_CLIENT_ID,
@@ -11,12 +11,9 @@ module.exports = function (app) {
 
     // Login is open to ANY Google account — no domain or allowlist check.
     // This was a deliberate choice (confirmed 2026-08-05), not an oversight:
-    // anyone who reaches /login and signs in with Google gets full access to
-    // call logs (customer phone numbers), agent management, the IVR editor,
-    // and the dialer (which places real, billed calls). Revisit this if that
-    // stops being an acceptable tradeoff — an allowlist is a small change
-    // from here (check payload.email against a stored list of approved
-    // addresses in the callback below, instead of skipping the check).
+    // anyone who reaches /login and signs in with Google gets a session.
+    // What they can DO once signed in is governed by role (below) — an
+    // unrecognized email defaults to 'agent', the more restricted role.
 
     // Without these, generateAuthUrl() silently builds a URL with no
     // redirect_uri param, which Google rejects with a cryptic
@@ -32,13 +29,62 @@ module.exports = function (app) {
     app.get('/login', (req, res) => {
         res.send(`
         <html>
-        <body style="font-family:-apple-system,sans-serif;display:flex;height:100vh;align-items:center;justify-content:center;background:#F5F7FB;">
-            <div style="background:white;padding:40px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.05);text-align:center;">
-                <h2>💚 Chumz Support</h2>
-                <p style="color:#6B7280;">Sign in with Google to continue</p>
-                <a href="/auth/google" style="display:inline-block;background:#0F9D58;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">
-                    Sign in with Google
-                </a>
+        <head>
+            <meta charset="utf-8">
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link href="https://fonts.googleapis.com/css2?family=Sora:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                * { box-sizing: border-box; }
+                body {
+                    margin: 0;
+                    font-family: 'Public Sans', -apple-system, sans-serif;
+                    background: #f8fafc;
+                    display: flex;
+                    height: 100vh;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .card {
+                    background: white;
+                    padding: 40px;
+                    border-radius: 12px;
+                    border: 1px solid #e2e8f0;
+                    text-align: center;
+                    max-width: 360px;
+                }
+                .logo {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 9px;
+                    background: #4ade80;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-family: 'Sora', sans-serif;
+                    font-weight: 800;
+                    color: #14532d;
+                    margin: 0 auto 16px;
+                }
+                h2 { font-family: 'Sora', sans-serif; font-weight: 800; margin: 0 0 6px; color: #0f172a; }
+                p { color: #64748b; font-size: 14px; margin: 0 0 24px; }
+                a.btn {
+                    display: inline-block;
+                    background: #15803d;
+                    color: white;
+                    padding: 11px 22px;
+                    border-radius: 8px;
+                    text-decoration: none;
+                    font-weight: 700;
+                    font-size: 14px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <div class="logo">C</div>
+                <h2>Chumz Support</h2>
+                <p>Sign in with Google to continue</p>
+                <a href="/auth/google" class="btn">Sign in with Google</a>
             </div>
         </body>
         </html>
@@ -74,8 +120,22 @@ module.exports = function (app) {
                 return res.status(403).send('Your Google account email is not verified');
             }
 
+            // Look up whether this email is a recognized agent, and if so
+            // what role/id they hold. Unrecognized emails default to 'agent'
+            // (the more restricted role) rather than failing login — login
+            // itself stays open to anyone, per the policy above. `agentId`
+            // (when present) is how the frontend matches "my performance"
+            // out of the agent-stats list without a separate lookup.
+            const { data: agent } = await supabase
+                .from('agents')
+                .select('id, role')
+                .eq('email', payload.email)
+                .maybeSingle();
+
+            const role = agent?.role === 'supervisor' ? 'supervisor' : 'agent';
+
             const sessionToken = jwt.sign(
-                { email: payload.email, name: payload.name },
+                { email: payload.email, name: payload.name, role, agentId: agent?.id ?? null },
                 process.env.JWT_SECRET,
                 { expiresIn: '7d' }
             );
@@ -87,7 +147,7 @@ module.exports = function (app) {
                 maxAge: 7 * 24 * 60 * 60 * 1000
             });
 
-            res.redirect('/dashboard');
+            res.redirect('/app');
         } catch (error) {
             console.error('❌ Google auth failed:', error.message);
             res.status(401).send('Authentication failed');
@@ -99,10 +159,10 @@ module.exports = function (app) {
         res.redirect('/login');
     });
 
-    // Protects both the HTML dashboard and the JSON API (api.js) — API
-    // requests get a 401 JSON body instead of a redirect, since a fetch()
-    // call has no browser chrome to redirect.
-    return function requireAuth(req, res, next) {
+    // Protects the JSON API (api.js) and the /export and /ticket routes —
+    // API requests get a 401 JSON body instead of a redirect, since a
+    // fetch() call has no browser chrome to redirect.
+    function requireAuth(req, res, next) {
         try {
             req.user = jwt.verify(req.cookies.session, process.env.JWT_SECRET);
             next();
@@ -112,5 +172,22 @@ module.exports = function (app) {
             }
             res.redirect('/login');
         }
-    };
+    }
+
+    // Stricter than requireAuth — role is baked into the JWT at login time,
+    // so promoting someone to supervisor requires them to log out/in (or
+    // wait out the 7-day token expiry) before it takes effect.
+    function requireSupervisor(req, res, next) {
+        requireAuth(req, res, () => {
+            if (req.user?.role !== 'supervisor') {
+                if (req.path.startsWith('/api/')) {
+                    return res.status(403).json({ error: 'Supervisor access required' });
+                }
+                return res.status(403).send('Supervisor access required');
+            }
+            next();
+        });
+    }
+
+    return { requireAuth, requireSupervisor };
 };
