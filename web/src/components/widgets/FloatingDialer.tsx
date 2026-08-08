@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { apiFetch } from '../../lib/api';
 import { useToast } from '../../lib/toast';
+import { useSoftphone } from '../../lib/softphone';
 import { formatPhone, isValidPhone } from '../../lib/phoneFormat';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
@@ -11,6 +11,7 @@ export default function FloatingDialer() {
     const [error, setError] = useState('');
     const [calling, setCalling] = useState(false);
     const showToast = useToast();
+    const { registrationState, placeCall } = useSoftphone();
 
     async function makeCall() {
         const phone = formatPhone(input);
@@ -20,11 +21,18 @@ export default function FloatingDialer() {
             return;
         }
 
+        if (registrationState !== 'registered') {
+            setError('Softphone is not registered yet — check your connection');
+            return;
+        }
+
         setError('');
         setCalling(true);
 
         try {
-            await apiFetch('/call', { method: 'POST', body: JSON.stringify({ phone }) });
+            // formatPhone strips the leading "+" (254XXXXXXXXX); the
+            // dialplan's outbound pattern expects the full E.164 form.
+            await placeCall(`+${phone}`);
             showToast(`📞 Calling ${phone}`);
             setInput('');
             setOpen(false);

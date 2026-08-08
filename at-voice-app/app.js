@@ -59,7 +59,7 @@ async function getIvrOptions() {
 
 // Routes
 apiRoutes(app, supabase, requireAuth, requireSupervisor);
-outboundRoutes(app, requireAuth);
+outboundRoutes(app, supabase, requireAuth);
 
 // Health
 app.get('/', (req, res) => {
@@ -246,7 +246,20 @@ app.post('/agent-standby-input', async (req, res) => {
         .maybeSingle();
 
     if (waiting) {
-        await supabase.from('agents').update({ status: 'on_call' }).eq('id', agentId);
+        const { data: agent } = await supabase.from('agents').select('phone').eq('id', agentId).single();
+
+        // Mark the row 'ongoing' right here, at the exact moment we know
+        // it's actually being bridged — don't wait on /events to get there.
+        // /events sets 'ongoing' too, but only from a generic "is this call
+        // active" signal that can't tell "on hold in the queue" apart from
+        // "just bridged to an agent" (a caller in <Enqueue> is itself still
+        // an active call from AT's perspective) — see the guard there.
+        await Promise.all([
+            supabase.from('agents').update({ status: 'on_call' }).eq('id', agentId),
+            supabase.from('call_logs')
+                .update({ status: 'ongoing', agent_number: agent ? normalizePhone(agent.phone) : undefined })
+                .eq('session_id', waiting.session_id)
+        ]);
 
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
@@ -284,6 +297,24 @@ app.post('/events', async (req, res) => {
     if (isActive === '1') status = 'ongoing';
     if (isActive === '0' && durationInSeconds > 0) status = 'completed';
     if (isActive === '0' && durationInSeconds == 0) status = 'failed';
+
+    // A caller sitting in <Enqueue> hold is itself still an "active" call
+    // from AT's perspective, so isActive alone can't distinguish "on hold"
+    // from "just bridged to an agent" — that would flip the row to 'ongoing'
+    // the moment this fires while someone's still genuinely waiting,
+    // vanishing them from the Live Queue page before any agent picked up.
+    // /agent-standby-input owns the real queued→ongoing transition (it
+    // knows for certain a Dequeue is happening); this only guards against
+    // this handler racing ahead of it.
+    const { data: existingRow } = await supabase
+        .from('call_logs')
+        .select('status')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+
+    if (existingRow?.status === 'queued' && status === 'ongoing') {
+        status = 'queued';
+    }
 
     // Dial/standby legs to an agent land here as their own event. We tag
     // them with agent_number for stats. Presence transitions to

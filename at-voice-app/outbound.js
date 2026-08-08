@@ -1,7 +1,7 @@
 const { placeCall } = require('./lib/voice');
-const { toE164, isValidE164 } = require('./lib/phone');
+const { toE164, isValidE164, normalizePhone } = require('./lib/phone');
 
-module.exports = function (app, requireAuth) {
+module.exports = function (app, supabase, requireAuth) {
 
     // 📞 CALL ROUTE (GET + POST supported)
     app.all('/call', requireAuth, async (req, res) => {
@@ -27,7 +27,24 @@ module.exports = function (app, requireAuth) {
 
             console.log("✅ Call started:", response);
 
-            res.send(`Calling ${phone}`);
+            // Best-effort: AT's call() response is assumed to carry the new
+            // session_id under entries[0].sessionId (unverified — same
+            // caveat as clientRequestId in lib/voice.js). Logging it now,
+            // before /events ever fires, is what lets the dialer poll for
+            // this specific call's status instead of showing a toast that
+            // vanishes regardless of whether the call actually connected.
+            const sessionId = response?.entries?.[0]?.sessionId;
+
+            if (sessionId) {
+                await supabase.from('call_logs').upsert({
+                    session_id: sessionId,
+                    caller: normalizePhone(phone),
+                    direction: 'Outbound',
+                    status: 'dialing'
+                }, { onConflict: 'session_id' });
+            }
+
+            res.json({ ok: true, session_id: sessionId || null });
 
         } catch (error) {
 
@@ -40,7 +57,7 @@ module.exports = function (app, requireAuth) {
 
             console.error("❌ MESSAGE:", error.message);
 
-            res.status(500).send('Call failed');
+            res.status(500).json({ error: 'Call failed' });
         }
     });
 

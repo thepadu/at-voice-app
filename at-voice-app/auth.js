@@ -26,6 +26,14 @@ module.exports = function (app, supabase) {
         console.error(`❌ Google SSO is misconfigured — missing env var(s): ${missingEnvVars.join(', ')}`);
     }
 
+    // Bootstraps the very first supervisor(s) — there's otherwise no way for
+    // anyone to become one (the roster's promote-to-supervisor control is
+    // itself supervisor-gated). Comma-separated, case-insensitive.
+    const supervisorEmails = (process.env.SUPERVISOR_EMAILS || '')
+        .split(',')
+        .map(e => e.trim().toLowerCase())
+        .filter(Boolean);
+
     app.get('/login', (req, res) => {
         res.send(`
         <html>
@@ -231,11 +239,37 @@ module.exports = function (app, supabase) {
             // itself stays open to anyone, per the policy above. `agentId`
             // (when present) is how the frontend matches "my performance"
             // out of the agent-stats list without a separate lookup.
-            const { data: agent } = await supabase
+            let { data: agent } = await supabase
                 .from('agents')
                 .select('id, role')
                 .eq('email', payload.email)
                 .maybeSingle();
+
+            // First time this email has ever logged in — create their roster
+            // row now, so a supervisor actually has someone to see/promote.
+            // Without this, an unrecognized login worked (role defaulted to
+            // 'agent' in the JWT below) but left no trace anywhere a
+            // supervisor could act on. `phone` stays null until a supervisor
+            // sets one — they can't go "available" until then, but the row
+            // itself needs to exist regardless.
+            if (!agent) {
+                const role = supervisorEmails.includes(payload.email.toLowerCase()) ? 'supervisor' : 'agent';
+
+                const { data: created, error: createError } = await supabase
+                    .from('agents')
+                    .upsert(
+                        { email: payload.email, name: payload.name, status: 'offline', role },
+                        { onConflict: 'email' }
+                    )
+                    .select('id, role')
+                    .single();
+
+                if (createError) {
+                    console.error('❌ Failed to provision agent row for new login:', createError.message);
+                } else {
+                    agent = created;
+                }
+            }
 
             const role = agent?.role === 'supervisor' ? 'supervisor' : 'agent';
 

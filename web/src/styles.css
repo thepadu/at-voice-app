@@ -454,6 +454,25 @@ tr:not(:last-child) td {
     cursor: pointer;
 }
 
+.stage-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.stage-waiting {
+    background: var(--brand-dark);
+    color: #fff;
+}
+
+.stage-in-menu {
+    background: var(--page-bg);
+    color: var(--ink);
+    border: 1px solid var(--border);
+}
+
 .danger-text {
     color: #b91c1c;
 }
@@ -790,6 +809,23 @@ textarea {
     gap: 8px;
 }
 
+.dialer-call-status {
+    position: absolute;
+    bottom: 66px;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--brand-dark);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+}
+
 .dialer-popover-actions .btn {
     flex: 1;
 }
@@ -996,11 +1032,82 @@ textarea {
     font-weight: 700;
 }
 
+.status-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .status-bar-ticket-btn {
     background: #fff;
     color: var(--brand-dark);
     padding: 6px 14px;
     font-size: 12px;
+}
+
+.status-bar-control-btn {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    padding: 6px 14px;
+    font-size: 12px;
+}
+
+.status-bar-control-active {
+    background: #fff;
+    color: var(--brand-dark);
+}
+
+.status-bar-end-btn {
+    background: #ef4444;
+    color: #fff;
+    padding: 6px 14px;
+    font-size: 12px;
+}
+
+/* ── Incoming call banner ─────────────────────────────────────────── */
+
+.incoming-call-banner {
+    flex-shrink: 0;
+    background: var(--brand-dark);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 28px;
+    font-size: 14px;
+}
+
+.incoming-call-banner-pulse {
+    animation: pulse-banner 1s infinite;
+}
+
+@keyframes pulse-banner {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); }
+    50% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+}
+
+.incoming-call-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.incoming-call-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.incoming-call-answer {
+    background: var(--brand-bright);
+    color: var(--brand-dark);
+    padding: 6px 18px;
+    font-weight: 700;
+}
+
+.incoming-call-reject {
+    background: #ef4444;
+    color: #fff;
+    padding: 6px 18px;
 }
 
 /* ── Wrap-up modal ─────────────────────────────────────────────────── */

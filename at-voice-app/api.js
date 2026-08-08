@@ -115,16 +115,17 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         res.json({ calls: data.filter(row => !isAgentLegRow(row)) });
     });
 
-    // GET /api/queue — the Live Queue page: who's actually on hold right
-    // now (status 'queued'), plus wait-time stats. Rows are informational,
-    // not individually actionable from the browser — accepting a call
-    // happens by an available agent pressing a digit on their phone (see
-    // SYSTEM_DESIGN.md), not by clicking a row here.
+    // GET /api/queue — the Live Queue page: this is the design's intended
+    // incoming-calls screen, so it needs to show a call from the moment it
+    // reaches the IVR, not just once it's actually on hold (status
+    // 'queued'). Rows are informational, not individually actionable from
+    // the browser — accepting a call happens by an available agent pressing
+    // a digit on their phone (see SYSTEM_DESIGN.md), not by clicking a row.
     app.get('/api/queue', requireAuth, async (req, res) => {
         const { data, error } = await supabase
             .from('call_logs')
             .select('*')
-            .eq('status', 'queued')
+            .in('status', ['ivr_started', 'input_received', 'queued'])
             .order('created_at', { ascending: true });
 
         if (error) {
@@ -132,16 +133,45 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(500).json({ error: 'Failed to load queue' });
         }
 
-        const waits = data.map(row => Math.floor((Date.now() - new Date(row.created_at).getTime()) / 1000));
+        const rows = data.map(row => ({
+            ...row,
+            stage: row.status === 'queued' ? 'Waiting' : 'In Menu',
+            waitSeconds: Math.floor((Date.now() - new Date(row.created_at).getTime()) / 1000)
+        }));
+
+        // Wait-time stats only count callers actually on hold — someone
+        // still navigating the IVR menu hasn't started waiting for an agent
+        // yet, so including them would understate how long the queue really is.
+        const waits = rows.filter(row => row.stage === 'Waiting').map(row => row.waitSeconds);
 
         res.json({
-            calls: data.map((row, i) => ({ ...row, waitSeconds: waits[i] })),
+            calls: rows,
             stats: {
-                inQueue: data.length,
+                inQueue: waits.length,
                 avgWaitSeconds: waits.length ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length) : 0,
                 longestWaitSeconds: waits.length ? Math.max(...waits) : 0
             }
         });
+    });
+
+    // GET /api/calls/:sessionId — a single call's current state, by session
+    // id. Used by the floating dialer to poll for "is the call I just placed
+    // still dialing / connected / over" without any push infra. Registered
+    // after /api/calls/live and /api/queue above so those literal paths
+    // aren't shadowed by this dynamic segment.
+    app.get('/api/calls/:sessionId', requireAuth, async (req, res) => {
+        const { data, error } = await supabase
+            .from('call_logs')
+            .select('*')
+            .eq('session_id', req.params.sessionId)
+            .maybeSingle();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load call' });
+        }
+
+        res.json({ call: data ?? null });
     });
 
     // A bare count, not the roster itself — safe for the topbar's "N agents
@@ -297,6 +327,40 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             .maybeSingle();
 
         res.json({ call: call ?? null, agentStatus: agent.status });
+    });
+
+    // Lets the React app register as a real WebRTC softphone (SIP.js) —
+    // credentials are provisioned server-side in agent_sip_credentials, kept
+    // in its own table (not columns on `agents`) since they're a more
+    // sensitive device secret than anything else exposed about an agent.
+    app.get('/api/agents/me/sip-credentials', requireAuth, async (req, res) => {
+        const { data: agent } = await supabase.from('agents').select('id').eq('email', req.user.email).maybeSingle();
+
+        if (!agent) {
+            return res.status(404).json({ error: 'No agent record linked to your account yet' });
+        }
+
+        const { data: creds, error } = await supabase
+            .from('agent_sip_credentials')
+            .select('sip_username, sip_password')
+            .eq('agent_id', agent.id)
+            .maybeSingle();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load SIP credentials' });
+        }
+
+        if (!creds) {
+            return res.status(404).json({ error: 'No softphone credentials provisioned for your account yet' });
+        }
+
+        res.json({
+            username: creds.sip_username,
+            password: creds.sip_password,
+            domain: process.env.SOFTPHONE_SIP_DOMAIN || 'sip.chumz.online',
+            wssUrl: process.env.SOFTPHONE_WSS_URL || 'wss://sip.chumz.online:8089/ws'
+        });
     });
 
     // ── Agent roster management (supervisors only) ─────────────────────

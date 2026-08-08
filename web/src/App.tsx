@@ -5,6 +5,7 @@ import { queryClient } from './lib/queryClient';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ThemeProvider } from './lib/theme';
 import { ToastProvider } from './lib/toast';
+import { SoftphoneProvider } from './lib/softphone';
 import { ActiveCallProvider } from './lib/activeCall';
 import Layout from './components/layout/Layout';
 
@@ -79,13 +80,15 @@ export default function App() {
             <ThemeProvider>
                 <ToastProvider>
                     <AuthProvider>
-                        <ActiveCallProvider>
-                            <BrowserRouter basename="/app">
-                                <Layout>
-                                    <AppRoutes />
-                                </Layout>
-                            </BrowserRouter>
-                        </ActiveCallProvider>
+                        <SoftphoneProvider>
+                            <ActiveCallProvider>
+                                <BrowserRouter basename="/app">
+                                    <Layout>
+                                        <AppRoutes />
+                                    </Layout>
+                                </BrowserRouter>
+                            </ActiveCallProvider>
+                        </SoftphoneProvider>
                     </AuthProvider>
                 </ToastProvider>
             </ThemeProvider>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useActiveCall } from '../../lib/activeCall';
+import { useSoftphone } from '../../lib/softphone';
 
 function formatDuration(sec: number) {
     const m = Math.floor(sec / 60);
@@ -8,33 +9,62 @@ function formatDuration(sec: number) {
 }
 
 export default function StatusBar() {
-    const { activeCall, openQuickTicket } = useActiveCall();
+    const { activeCall: polledCall, openQuickTicket } = useActiveCall();
+    const { activeCall: softphoneCall, toggleMute, toggleHold, hangup } = useSoftphone();
     const [seconds, setSeconds] = useState(0);
 
+    // SIP.js's own session is the source of truth for anything the browser
+    // directly witnesses in real time (this bar's render condition, mute,
+    // hold) — the 5s Supabase poll stays authoritative for things only the
+    // server knows (wrap-up/ticket triggers), so the two don't fight over
+    // the same state. Falling back to the polled call keeps the bar visible
+    // during the brief gap right after answering, before the local SIP.js
+    // session has finished transitioning to Established.
+    const caller = softphoneCall?.remoteNumber ?? polledCall?.caller;
+    const startedAt = softphoneCall?.startedAt ?? (polledCall ? new Date(polledCall.created_at).getTime() : null);
+
     useEffect(() => {
-        if (!activeCall) return;
-        const start = new Date(activeCall.created_at).getTime();
-        const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+        if (!startedAt) return;
+        const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
         tick();
         const interval = setInterval(tick, 1000);
         return () => clearInterval(interval);
-        // Deliberately depending on the primitive fields, not `activeCall`
-        // itself — react-query hands back a new object on every 5s poll
-        // even when nothing changed, and restarting this interval that
-        // often would make the timer visibly stutter.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeCall?.session_id, activeCall?.created_at]);
+    }, [startedAt]);
 
-    if (!activeCall) return null;
+    if (!caller) return null;
 
     return (
         <div className="status-bar">
             <div className="status-bar-info">
                 <span className="status-bar-dot" />
-                On call with <strong>{activeCall.caller}</strong>
+                On call with <strong>{caller}</strong>
                 <span className="status-bar-timer">{formatDuration(seconds)}</span>
             </div>
-            <button className="btn status-bar-ticket-btn" onClick={openQuickTicket}>+ Ticket</button>
+            <div className="status-bar-actions">
+                {softphoneCall && (
+                    <>
+                        <button
+                            className={`btn status-bar-control-btn ${softphoneCall.muted ? 'status-bar-control-active' : ''}`}
+                            onClick={toggleMute}
+                        >
+                            {softphoneCall.muted ? 'Unmute' : 'Mute'}
+                        </button>
+                        <button
+                            className={`btn status-bar-control-btn ${softphoneCall.held ? 'status-bar-control-active' : ''}`}
+                            onClick={toggleHold}
+                            title={softphoneCall.held ? 'They currently hear silence' : "They'll hear silence, not hold music"}
+                        >
+                            {softphoneCall.held ? 'Resume' : 'Hold'}
+                        </button>
+                        <button className="btn status-bar-end-btn" onClick={hangup}>
+                            End call
+                        </button>
+                    </>
+                )}
+                <button className="btn status-bar-ticket-btn" onClick={openQuickTicket}>
+                    + Ticket
+                </button>
+            </div>
         </div>
     );
 }

@@ -28,8 +28,19 @@ export default function IvrEditor() {
     const queryClient = useQueryClient();
     const showToast = useToast();
 
-    const { data: greetingData } = useQuery({ queryKey: ['ivr-config'], queryFn: () => apiFetch('/api/ivr-config') });
-    const { data: optionsData } = useQuery({ queryKey: ['ivr-options'], queryFn: () => apiFetch('/api/ivr-options') });
+    const {
+        data: greetingData,
+        isError: greetingIsError,
+        error: greetingError,
+        refetch: refetchGreeting
+    } = useQuery({ queryKey: ['ivr-config'], queryFn: () => apiFetch('/api/ivr-config') });
+
+    const {
+        data: optionsData,
+        isError: optionsIsError,
+        error: optionsError,
+        refetch: refetchOptions
+    } = useQuery({ queryKey: ['ivr-options'], queryFn: () => apiFetch('/api/ivr-options') });
 
     const options: IvrOption[] = useMemo(() => optionsData?.options ?? [], [optionsData]);
 
@@ -116,6 +127,12 @@ export default function IvrEditor() {
             <div>
                 <div className="panel">
                     <h3>Greeting message</h3>
+                    {greetingIsError && (
+                        <p className="error">
+                            Couldn&apos;t load the greeting ({errorMessage(greetingError)}).{' '}
+                            <button className="btn-link" onClick={() => refetchGreeting()}>Retry</button>
+                        </p>
+                    )}
                     <textarea value={greeting} onChange={e => setGreeting(e.target.value)} rows={2} />
                     <div className="modal-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }}>
                         <button
@@ -134,6 +151,12 @@ export default function IvrEditor() {
                         <button className="btn btn-primary" onClick={() => setAddOpen(true)}>+ Add option</button>
                     </div>
                     <p className="hint">This is exactly what callers hear — edits take effect on the next call.</p>
+                    {optionsIsError && (
+                        <p className="error">
+                            Couldn&apos;t load the menu ({errorMessage(optionsError)}).{' '}
+                            <button className="btn-link" onClick={() => refetchOptions()}>Retry</button>
+                        </p>
+                    )}
 
                     {options.map(option => {
                         const draft = drafts[option.digit] ?? option;

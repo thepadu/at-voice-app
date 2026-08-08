@@ -5,6 +5,7 @@ type QueuedCall = {
     session_id: string;
     caller: string;
     waitSeconds: number;
+    stage: 'Waiting' | 'In Menu';
 };
 
 function formatWait(sec: number) {
@@ -13,9 +14,12 @@ function formatWait(sec: number) {
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function waitRowClass(sec: number) {
-    if (sec >= 90) return 'live-row queue-row-danger';
-    if (sec >= 60) return 'queue-row-warning';
+// SLA coloring only applies once a caller is actually on hold — someone
+// still navigating the IVR menu isn't "late" yet.
+function waitRowClass(call: QueuedCall) {
+    if (call.stage !== 'Waiting') return '';
+    if (call.waitSeconds >= 90) return 'live-row queue-row-danger';
+    if (call.waitSeconds >= 60) return 'queue-row-warning';
     return '';
 }
 
@@ -67,16 +71,22 @@ export default function LiveQueue() {
                     <thead>
                         <tr>
                             <th>Caller</th>
+                            <th>Stage</th>
                             <th>Wait</th>
                         </tr>
                     </thead>
                     <tbody>
                         {calls.length === 0 && (
-                            <tr><td colSpan={2} className="empty">Queue is empty. All callers answered.</td></tr>
+                            <tr><td colSpan={3} className="empty">Queue is empty. All callers answered.</td></tr>
                         )}
                         {calls.map(call => (
-                            <tr key={call.session_id} className={waitRowClass(call.waitSeconds)}>
+                            <tr key={call.session_id} className={waitRowClass(call)}>
                                 <td>{call.caller}</td>
+                                <td>
+                                    <span className={call.stage === 'Waiting' ? 'stage-badge stage-waiting' : 'stage-badge stage-in-menu'}>
+                                        {call.stage}
+                                    </span>
+                                </td>
                                 <td style={{ fontWeight: 700 }}>{formatWait(call.waitSeconds)}</td>
                             </tr>
                         ))}

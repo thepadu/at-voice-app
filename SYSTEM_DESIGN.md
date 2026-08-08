@@ -18,6 +18,8 @@ One Express process serves everything. The React app is built (`vite build` in `
 
 Schema changes live in `at-voice-app/migrations/*.sql`, numbered and applied in order — every one is idempotent (safe to re-run), which matters since there's no migration-runner tooling, just the Supabase SQL editor.
 
+**Historical data note**: `call_logs.session_id` had no unique constraint on the live table until `005a_dedupe_call_logs.sql` was run (2026-08). Before that, every `.upsert(..., { onConflict: 'session_id' })` call in `app.js` silently fell back to a plain `INSERT` — there was no constraint for Postgres to conflict against — so each real call left 2-3 rows in `call_logs` (one per lifecycle stage: `/ivr`, `/handle-input`, `/events`) instead of one row updated in place. `005a` merges those into one row per session before the constraint is added. Any call-count stats reported before that migration ran were inflated roughly 2-3x.
+
 ## Auth & roles
 
 Google OAuth (`auth.js`), open to **any** Google account — no domain or email allowlist (a deliberate tradeoff, see the file's own comment). What an authenticated user can *do* depends on whether their email matches an `agents` row and what `role` it has.
