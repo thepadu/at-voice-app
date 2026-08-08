@@ -8,7 +8,8 @@ const {
     upsertCallLog,
     getAvailableAgentsWithSip,
     setAgentStatus,
-    getAgentPhone
+    getAgentPhone,
+    getNoAgentsForwardingDestination
 } = require('./supabase');
 
 const ARI_URL = process.env.ARI_URL || 'http://127.0.0.1:8088';
@@ -26,7 +27,9 @@ const HOLDING_BRIDGE_NAME = 'support-queue';
 // for the dashboard's visibility — they are not read back to decide what
 // happens next inside this process.
 const waitingQueue = []; // { channel, sessionId, joinedAt }
-const agentLegBySessionId = new Map(); // customer sessionId -> { agentChannel, bridge, agentId }
+const agentLegBySessionId = new Map(); // agent leg channel id -> { channel: customerChannel, sessionId, agentId }
+const ringGroupBySessionId = new Map(); // customer sessionId -> [{ channel: agentChannel, agentId }, ...]
+const claimedSessions = new Set(); // customer sessionIds already won by an agent — guards the simultaneous-answer race
 
 let client;
 let holdingBridge;
@@ -119,6 +122,21 @@ async function runIvrMenu(channel, sessionId) {
 
     if (option.action === 'transfer_agent') {
         if (option.response_message) await playText(channel, option.response_message);
+
+        // Forwarding is a fallback for nobody being logged in at all — an
+        // agent or two being busy on other calls is the normal case and
+        // should just queue, not forward.
+        const availableAgents = await getAvailableAgentsWithSip();
+        if (availableAgents.length === 0) {
+            const destination = await getNoAgentsForwardingDestination();
+            if (destination) {
+                console.log(`↪️  ${sessionId}: no agents online, forwarding to ${destination}`);
+                await upsertCallLog({ session_id: sessionId, status: 'completed' });
+                await channel.setChannelVar({ variable: 'FORWARD_DEST', value: destination });
+                return channel.continueInDialplan({ context: 'forward-external', extension: 's', priority: 1 });
+            }
+        }
+
         return enterQueue(channel, sessionId);
     }
 
@@ -153,54 +171,85 @@ async function tryDequeueNext() {
     }
 }
 
+// Rings every currently-available agent's browser at once — first to
+// answer wins (see bridgeAgentLeg's claim check), the rest get hung up and
+// put back to 'available' the moment someone else wins.
 async function dequeueNext() {
-
     const agents = await getAvailableAgentsWithSip();
     if (agents.length === 0) return;
 
-    const agent = agents[0];
     const waiting = waitingQueue.shift();
+    console.log(`📲 Ringing ${agents.length} available agent(s) for ${waiting.sessionId}`);
 
-    console.log(`📲 Ringing agent ${agent.name} (${agent.agent_sip_credentials.sip_username}) for ${waiting.sessionId}`);
-    await setAgentStatus(agent.id, 'ringing');
+    const ringGroup = [];
 
-    let agentChannel;
-    try {
-        agentChannel = await client.channels.originate({
-            endpoint: `PJSIP/${agent.agent_sip_credentials.sip_username}`,
-            app: APP_NAME,
-            appArgs: `agent-leg:${agent.id}:${waiting.sessionId}`,
-            // No spaces — ari-client's HTTP layer doesn't URL-encode query
-            // params correctly, and a raw space here silently produces a
-            // malformed request ("Allocation failed") rather than an
-            // encoding error.
-            callerId: 'Support-Queue',
-            timeout: 25
-        });
-    } catch (err) {
-        console.error(`❌ Failed to ring agent ${agent.id}:`, err.message);
-        await setAgentStatus(agent.id, 'available');
-        waitingQueue.unshift(waiting); // retry with someone else next tick
+    await Promise.all(
+        agents.map(async agent => {
+            await setAgentStatus(agent.id, 'ringing');
+            try {
+                const agentChannel = await client.channels.originate({
+                    endpoint: `PJSIP/${agent.agent_sip_credentials.sip_username}`,
+                    app: APP_NAME,
+                    appArgs: `agent-leg:${agent.id}:${waiting.sessionId}`,
+                    // No spaces — ari-client's HTTP layer doesn't URL-encode
+                    // query params correctly, and a raw space here silently
+                    // produces a malformed request ("Allocation failed")
+                    // rather than an encoding error.
+                    callerId: 'Support-Queue',
+                    timeout: 25
+                });
+                agentLegBySessionId.set(agentChannel.id, { channel: waiting.channel, sessionId: waiting.sessionId, agentId: agent.id });
+                ringGroup.push({ channel: agentChannel, agentId: agent.id });
+            } catch (err) {
+                console.error(`❌ Failed to ring agent ${agent.id}:`, err.message);
+                await setAgentStatus(agent.id, 'available');
+            }
+        })
+    );
+
+    if (ringGroup.length === 0) {
+        waitingQueue.unshift(waiting); // nobody could actually be reached — retry next tick
         return;
     }
 
-    agentLegBySessionId.set(agentChannel.id, { ...waiting, agentId: agent.id });
+    ringGroupBySessionId.set(waiting.sessionId, ringGroup);
+}
+
+// Hangs up every ringing leg except the winner and reverts their agent
+// status — called the instant one agent answers.
+async function stopSiblingRings(customerSessionId, winningChannelId) {
+    const siblings = ringGroupBySessionId.get(customerSessionId) || [];
+    ringGroupBySessionId.delete(customerSessionId);
+
+    await Promise.all(
+        siblings
+            .filter(sib => sib.channel.id !== winningChannelId)
+            .map(async sib => {
+                agentLegBySessionId.delete(sib.channel.id);
+                await sib.channel.hangup().catch(() => {});
+                await setAgentStatus(sib.agentId, 'available');
+            })
+    );
 }
 
 async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
-    // dequeueNext() already shift()'d this customer out of waitingQueue
-    // before originating the agent call — agentLegBySessionId is the actual
-    // handoff, keyed by the agent leg's own channel id.
     const pending = agentLegBySessionId.get(agentChannel.id);
     agentLegBySessionId.delete(agentChannel.id);
     const customerChannel = pending ? pending.channel : null;
 
-    if (!customerChannel) {
-        // Customer hung up while the agent's phone/browser was ringing.
+    // No `await` between this check and claimedSessions.add() below — both
+    // run synchronously in the same event-loop turn, so two agents
+    // answering "simultaneously" still resolve one-at-a-time here. Whoever
+    // loses the race sees claimedSessions already holding this session and
+    // backs off instead of double-bridging the same customer channel.
+    if (!customerChannel || claimedSessions.has(customerSessionId)) {
         await agentChannel.hangup().catch(() => {});
         await setAgentStatus(agentId, 'available');
         return;
     }
+    claimedSessions.add(customerSessionId);
+
+    await stopSiblingRings(customerSessionId, agentChannel.id);
 
     await agentChannel.answer();
 
@@ -222,6 +271,7 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
     const cleanup = async () => {
         if (cleaned) return;
         cleaned = true;
+        claimedSessions.delete(customerSessionId);
         await bridge.destroy().catch(() => {});
         await customerChannel.hangup().catch(() => {});
         await agentChannel.hangup().catch(() => {});
@@ -267,9 +317,17 @@ async function main() {
     });
 
     client.on('StasisEnd', async (event, channel) => {
-        // Drop from the waiting queue if they hang up before an agent picks up.
+        // Drop from the waiting queue if they hang up before any agent's
+        // phone/browser started ringing.
         const idx = waitingQueue.findIndex(w => w.channel.id === channel.id);
         if (idx !== -1) waitingQueue.splice(idx, 1);
+
+        // Customer sessionId === their own channel id — if they hang up
+        // while a ring group is still out for them, nothing else would ever
+        // stop those other agents' phones/browsers from ringing.
+        if (ringGroupBySessionId.has(channel.id)) {
+            await stopSiblingRings(channel.id, null);
+        }
     });
 
     client.on('error', err => console.error('❌ ARI client error:', err.message));

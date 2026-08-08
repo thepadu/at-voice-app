@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
+import Pagination from '../components/Pagination';
 
 type Call = {
     session_id: string;
@@ -35,13 +36,19 @@ export default function Tickets() {
     const queryClient = useQueryClient();
     const showToast = useToast();
 
+    const [ticketsPage, setTicketsPage] = useState(1);
+
     const { data: callsData } = useQuery({ queryKey: ['calls', 'recent'], queryFn: () => apiFetch('/api/calls') });
-    const { data: ticketsData } = useQuery({ queryKey: ['tickets'], queryFn: () => apiFetch('/api/tickets') });
+    const { data: ticketsData } = useQuery({
+        queryKey: ['tickets', ticketsPage],
+        queryFn: () => apiFetch(`/api/tickets?page=${ticketsPage}&pageSize=25`)
+    });
     const { data: tagsData } = useQuery({ queryKey: ['ticket-tags'], queryFn: () => apiFetch('/api/ticket-tags') });
     const { data: agentsData } = useQuery({ queryKey: ['agents-assignable'], queryFn: () => apiFetch('/api/agents/assignable') });
 
     const recentCalls: Call[] = (callsData?.calls ?? []).slice(0, 8);
     const tickets: Ticket[] = ticketsData?.tickets ?? [];
+    const ticketsTotalPages: number = ticketsData?.totalPages ?? 1;
     const tags: string[] = tagsData?.tags ?? [];
     const agents: Agent[] = agentsData?.agents ?? [];
 
@@ -132,6 +139,7 @@ export default function Tickets() {
                             ))}
                         </tbody>
                     </table>
+                    <Pagination page={ticketsPage} totalPages={ticketsTotalPages} onPageChange={setTicketsPage} />
                 </div>
             </div>
 

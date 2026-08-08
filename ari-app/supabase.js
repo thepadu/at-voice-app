@@ -58,6 +58,23 @@ async function getAgentPhone(agentId) {
     return data?.phone ?? null;
 }
 
+// "No agents online" forwarding — reuses the existing 'no_answer' condition
+// (the closest semantic fit of the four already in the schema; there's no
+// dedicated "nobody logged in" condition) rather than adding a new one.
+async function getNoAgentsForwardingDestination() {
+    const { data: config } = await supabase.from('forwarding_config').select('enabled').eq('id', 1).maybeSingle();
+    if (!config?.enabled) return null;
+
+    const { data: rule } = await supabase
+        .from('forwarding_rules')
+        .select('destination')
+        .eq('condition', 'no_answer')
+        .limit(1)
+        .maybeSingle();
+
+    return rule?.destination ?? null;
+}
+
 module.exports = {
     supabase,
     getIvrGreeting,
@@ -65,5 +82,6 @@ module.exports = {
     upsertCallLog,
     getAvailableAgentsWithSip,
     setAgentStatus,
-    getAgentPhone
+    getAgentPhone,
+    getNoAgentsForwardingDestination
 };

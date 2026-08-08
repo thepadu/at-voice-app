@@ -55,14 +55,24 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     });
 
     // GET /api/calls?tab=all|incoming|outgoing|missed&option=&status=&ticket=&caller=&from=&to=
+    // GET /api/calls?tab=...&page=1&pageSize=50 — tab/isAgentLegRow filtering
+    // happens in JS (see below), so pagination is applied after that rather
+    // than via a SQL .range(), which would need every one of those filters
+    // translated into (and correctly composed as) PostgREST query params —
+    // riskier to get subtly wrong than fetching a wide-enough page and
+    // slicing it. Fine at this project's scale; worth revisiting only if
+    // call_logs grows enough that a 2000-row fetch itself becomes the
+    // bottleneck (see SYSTEM_DESIGN.md).
     app.get('/api/calls', requireAuth, async (req, res) => {
         const { tab, from, to, option, status, ticket, caller } = req.query;
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
 
         let query = supabase
             .from('call_logs')
             .select('*')
             .order('created_at', { ascending: false })
-            .limit(200);
+            .limit(2000);
 
         if (from) query = query.gte('created_at', `${from}T00:00:00`);
         if (to) query = query.lte('created_at', `${to}T23:59:59`);
@@ -84,15 +94,24 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         if (tab === 'outgoing') calls = calls.filter(row => classifyDirection(row) === 'outgoing');
         if (tab === 'missed') calls = calls.filter(isMissed);
 
+        const summary = {
+            total: calls.length,
+            login: calls.filter(c => c.option_pressed === '1').length,
+            deposit: calls.filter(c => c.option_pressed === '2').length,
+            agentRequests: calls.filter(c => c.option_pressed === '3').length,
+            missed: calls.filter(isMissed).length
+        };
+
+        const rangeStart = (page - 1) * pageSize;
+        const pageOfCalls = calls.slice(rangeStart, rangeStart + pageSize);
+
         res.json({
-            calls,
-            summary: {
-                total: calls.length,
-                login: calls.filter(c => c.option_pressed === '1').length,
-                deposit: calls.filter(c => c.option_pressed === '2').length,
-                agentRequests: calls.filter(c => c.option_pressed === '3').length,
-                missed: calls.filter(isMissed).length
-            }
+            calls: pageOfCalls,
+            page,
+            pageSize,
+            total: calls.length,
+            totalPages: Math.max(1, Math.ceil(calls.length / pageSize)),
+            summary
         });
     });
 
@@ -582,12 +601,17 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // Any authenticated user can read/create/update tickets — this is
     // day-to-day agent work, not roster/config management.
 
+    // GET /api/tickets?page=1&pageSize=50
     app.get('/api/tickets', requireAuth, async (req, res) => {
-        const { data, error } = await supabase
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
+        const rangeStart = (page - 1) * pageSize;
+
+        const { data, error, count } = await supabase
             .from('tickets')
-            .select('*, agents(name)')
+            .select('*, agents(name)', { count: 'exact' })
             .order('created_at', { ascending: false })
-            .limit(200);
+            .range(rangeStart, rangeStart + pageSize - 1);
 
         if (error) {
             console.error(error);
@@ -595,7 +619,11 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         }
 
         res.json({
-            tickets: data.map(t => ({ ...t, assigned_agent_name: t.agents?.name ?? null, agents: undefined }))
+            tickets: data.map(t => ({ ...t, assigned_agent_name: t.agents?.name ?? null, agents: undefined })),
+            page,
+            pageSize,
+            total: count ?? 0,
+            totalPages: Math.max(1, Math.ceil((count ?? 0) / pageSize))
         });
     });
 
