@@ -108,16 +108,27 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             let creds;
             try {
                 creds = await apiFetch('/api/agents/me/sip-credentials');
-            } catch {
-                // No softphone credentials provisioned yet — not every agent
-                // has one, and that's fine, they just can't take browser calls.
+            } catch (err) {
+                // A 404 here is expected for an agent with no softphone
+                // credentials provisioned yet — anything else (401, 500,
+                // network failure) is a real problem worth seeing rather
+                // than silently leaving registrationState stuck at
+                // 'unregistered' with no clue why.
+                console.error('[softphone] failed to fetch SIP credentials:', err);
+                setRegistrationState('failed');
                 return;
             }
             if (cancelled) return;
 
+            console.log(`[softphone] got credentials for ${creds.username}@${creds.domain}, connecting to ${creds.wssUrl}`);
+
             domainRef.current = creds.domain;
             const uri = UserAgent.makeURI(`sip:${creds.username}@${creds.domain}`);
-            if (!uri) return;
+            if (!uri) {
+                console.error('[softphone] UserAgent.makeURI returned null for', creds.username, creds.domain);
+                setRegistrationState('failed');
+                return;
+            }
 
             const userAgent = new UserAgent({
                 uri,
@@ -157,7 +168,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                         }
                     }
                 });
-            } catch {
+            } catch (err) {
+                console.error('[softphone] registration threw:', err);
                 if (!cancelled) {
                     setRegistrationState('failed');
                     showToast('Softphone registration failed — you won’t receive browser calls', 'error');
