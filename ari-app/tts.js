@@ -31,6 +31,15 @@ function run(command, args, input) {
     });
 }
 
+// Two calls needing the SAME not-yet-cached text at the same moment (a real
+// risk on a single-vCPU box, where synthesis takes seconds) would otherwise
+// both spawn Piper against the same temp/output paths — whichever finishes
+// first deletes the raw temp file out from under the other, which then
+// throws ENOENT and hangs up that caller's channel. This map makes every
+// concurrent request for the same hash await the one in-flight synthesis
+// instead of racing to produce it twice.
+const inFlight = new Map();
+
 // Returns the Asterisk sound name (e.g. "custom/tts-ab12cd34") for the given
 // text — the caller passes this straight to channel.play({ media: `sound:${name}` }).
 async function synthesize(text) {
@@ -45,11 +54,25 @@ async function synthesize(text) {
         return soundName;
     }
 
+    if (inFlight.has(hash)) {
+        await inFlight.get(hash);
+        return soundName;
+    }
+
     const rawPath = path.join('/tmp', `tts-${hash}-raw.wav`);
 
-    await run(PIPER_BIN, ['--model', VOICE_MODEL, '--output_file', rawPath], text);
-    await run('sox', [rawPath, '-r', '8000', '-c', '1', '-e', 'mu-law', '-t', 'ul', ulawPath]);
-    fs.unlinkSync(rawPath);
+    const synthesisPromise = (async () => {
+        await run(PIPER_BIN, ['--model', VOICE_MODEL, '--output_file', rawPath], text);
+        await run('sox', [rawPath, '-r', '8000', '-c', '1', '-e', 'mu-law', '-t', 'ul', ulawPath]);
+        fs.unlinkSync(rawPath);
+    })();
+
+    inFlight.set(hash, synthesisPromise);
+    try {
+        await synthesisPromise;
+    } finally {
+        inFlight.delete(hash);
+    }
 
     return soundName;
 }

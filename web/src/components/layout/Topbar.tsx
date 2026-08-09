@@ -2,6 +2,7 @@ import { useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import { useTheme } from '../../lib/theme';
+import MyStatusControl from '../widgets/MyStatusControl';
 
 const TITLES: Record<string, string> = {
     '/': 'Dashboard',
@@ -39,6 +40,7 @@ export default function Topbar() {
                     <span className="topbar-badge-dot" />
                     {data?.count ?? '—'} agents live
                 </div>
+                <MyStatusControl />
                 <button className="topbar-theme-toggle" onClick={toggleDarkMode} title="Toggle night shift theme">
                     {darkMode ? '☀️ Light' : '🌙 Night shift'}
                 </button>

@@ -62,9 +62,8 @@ export default function LiveQueue() {
 
             <div className="panel">
                 <p className="hint">
-                    Available agents accept the next call by pressing 1 on their phone once they're on
-                    standby — there's no clickable "Answer" here, since Africa's Talking's phone-based
-                    queueing has no way for a web page to pick up a real call.
+                    Waiting callers ring every available agent's browser at once — first to answer gets
+                    the call. This page is for visibility into who's waiting, not an action panel.
                 </p>
 
                 <table>

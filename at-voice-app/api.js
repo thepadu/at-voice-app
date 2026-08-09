@@ -26,15 +26,30 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         return row.status === 'failed';
     }
 
-    // Going "available" now places a real outbound call that brings the
-    // agent onto the standby hold-queue loop (see app.js's /agent-standby) —
-    // not just a DB flag flip like before. Sets 'ringing' immediately, then
-    // 'offline' again if the call itself fails to place (a bad number, AT
-    // account issue, etc.) so the UI doesn't show someone as available when
-    // no call was ever placed.
+    // Going "available" means different things depending on how this agent
+    // actually takes calls:
+    //  - Agents with a real WebRTC softphone (a row in agent_sip_credentials,
+    //    provisioned on the self-hosted Asterisk box) just need the DB flag
+    //    flipped — the ARI app rings their *browser* directly the moment it
+    //    sees status='available', so placing a real phone call here would be
+    //    actively wrong (a stray billed call unrelated to the softphone).
+    //  - Agents never migrated to a softphone fall back to the original
+    //    behavior: a real outbound call that brings them onto the old
+    //    phone-standby hold-queue loop (see app.js's /agent-standby), so
+    //    nothing already depending on that path breaks.
     async function setAgentStatus(agent, status) {
         if (status !== 'available') {
             return supabase.from('agents').update({ status }).eq('id', agent.id).select().single();
+        }
+
+        const { data: sipCreds } = await supabase
+            .from('agent_sip_credentials')
+            .select('agent_id')
+            .eq('agent_id', agent.id)
+            .maybeSingle();
+
+        if (sipCreds) {
+            return supabase.from('agents').update({ status: 'available' }).eq('id', agent.id).select().single();
         }
 
         await supabase.from('agents').update({ status: 'ringing' }).eq('id', agent.id);

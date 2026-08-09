@@ -7,6 +7,7 @@ type Call = { session_id: string; caller: string; created_at: string };
 const ActiveCallContext = createContext<{
     activeCall: Call | null;
     lastCall: Call | null;
+    agentStatus: string | null;
     justEnded: boolean;
     dismissJustEnded: () => void;
     triggerWrapUp: () => void;
@@ -16,6 +17,7 @@ const ActiveCallContext = createContext<{
 }>({
     activeCall: null,
     lastCall: null,
+    agentStatus: null,
     justEnded: false,
     dismissJustEnded: () => {},
     triggerWrapUp: () => {},
@@ -40,7 +42,8 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     const wasOnCall = useRef(false);
 
     const activeCall: Call | null = data?.call ?? null;
-    const isOnCall = data?.agentStatus === 'on_call';
+    const agentStatus: string | null = data?.agentStatus ?? null;
+    const isOnCall = agentStatus === 'on_call';
 
     useEffect(() => {
         if (activeCall) setLastCall(activeCall);
@@ -56,6 +59,7 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
             value={{
                 activeCall,
                 lastCall,
+                agentStatus,
                 justEnded,
                 dismissJustEnded: () => setJustEnded(false),
                 // Lets the "E" keyboard shortcut open wrap-up early, before

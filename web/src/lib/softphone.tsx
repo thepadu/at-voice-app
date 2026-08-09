@@ -217,10 +217,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const toggleMute = useCallback(() => {
         if (!activeCall) return;
         const sender = getAudioSender(activeCall.session);
-        if (!sender?.track) return;
+        if (!sender?.track) {
+            // A real race if clicked the instant a call connects, before the
+            // peer connection has an audio sender yet — surface it rather
+            // than silently doing nothing, so the agent knows to retry.
+            showToast('Call audio isn’t ready yet — try again in a moment', 'error');
+            return;
+        }
         sender.track.enabled = activeCall.muted;
         setActiveCall({ ...activeCall, muted: !activeCall.muted });
-    }, [activeCall]);
+    }, [activeCall, showToast]);
 
     // Local-only hold: mutes both directions (we stop sending, and the far
     // end's audio is not attached while held). The far end hears silence,
@@ -229,11 +235,15 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const toggleHold = useCallback(() => {
         if (!activeCall || !remoteAudioRef.current) return;
         const sender = getAudioSender(activeCall.session);
+        if (!sender?.track) {
+            showToast('Call audio isn’t ready yet — try again in a moment', 'error');
+            return;
+        }
         const nextHeld = !activeCall.held;
-        if (sender?.track) sender.track.enabled = !nextHeld && !activeCall.muted;
+        sender.track.enabled = !nextHeld && !activeCall.muted;
         remoteAudioRef.current.muted = nextHeld;
         setActiveCall({ ...activeCall, held: nextHeld });
-    }, [activeCall]);
+    }, [activeCall, showToast]);
 
     const placeCall = useCallback(
         async (destinationE164: string) => {

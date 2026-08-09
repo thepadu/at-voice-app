@@ -88,10 +88,11 @@ export default function Agents() {
         setFormOpen(true);
     }
 
-    // Available → Break → Offline → Available. "Available" places a real
-    // call to bring the agent onto the standby queue (see SYSTEM_DESIGN.md)
-    // — it's not just a flag flip. on_call/ringing are system-managed; the
-    // toggle treats clicking either as "give up and go offline."
+    // Available → Break → Offline → Available. See setAgentStatus() in
+    // api.js for what "available" actually does — a direct flag flip for
+    // agents on a browser softphone, a real phone call for anyone not yet
+    // migrated. on_call/ringing are system-managed; the toggle treats
+    // clicking either as "give up and go offline."
     function nextStatus(agent: Agent): Agent['status'] {
         if (agent.status === 'available') return 'break';
         if (agent.status === 'break') return 'offline';
@@ -109,9 +110,9 @@ export default function Agents() {
                     <button className="btn btn-primary" onClick={openAddForm}>+ Add Agent</button>
                 </div>
                 <p className="hint">
-                    Going <strong>available</strong> calls the agent's phone right now to bring them onto the
-                    support queue — they accept the next waiting caller by pressing 1. Not just a status
-                    flag: it's a real, billed call, so they need to actually pick up.
+                    Agents with a browser softphone just go <strong>available</strong> — waiting callers ring
+                    their browser directly. Anyone not yet on a softphone falls back to the original
+                    behavior: a real, billed call to their phone to bring them onto the support queue.
                 </p>
 
                 {agents.length === 0 && <p className="empty">No agents yet — add your first one.</p>}
