@@ -38,8 +38,8 @@ export default function Sidebar() {
                     Live Queue
                     {inQueue > 0 && <span className="sidebar-badge">{inQueue}</span>}
                 </NavLink>
-                <NavLink to="/outbound" className="sidebar-link">
-                    Outbound &amp; Missed
+                <NavLink to="/calls" className="sidebar-link">
+                    Calls
                 </NavLink>
                 <NavLink to="/tickets" className="sidebar-link">
                     Tags &amp; Tickets

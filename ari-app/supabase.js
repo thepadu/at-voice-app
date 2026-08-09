@@ -89,6 +89,51 @@ async function getNoAgentsForwardingDestination() {
     return rule?.destination ?? null;
 }
 
+// Fails safe: if the table doesn't exist yet (migration not applied) or the
+// query errors for any other reason, treat hours as "not enforced" rather
+// than risk blocking every inbound call on a config problem.
+async function getBusinessHours() {
+    const { data, error } = await supabase.from('business_hours').select('*').eq('id', 1).maybeSingle();
+    if (error || !data) {
+        if (error) console.error('❌ Failed to load business hours:', error.message);
+        return { enabled: false };
+    }
+    return data;
+}
+
+// A call that leaves Stasis while still sitting in a pre-answer status was
+// never connected to an agent — genuinely missed. The status filter is what
+// makes this safe to call for every hung-up channel unconditionally:
+// 'ongoing' (already bridged) is deliberately excluded, so this can never
+// race with — or overwrite — the real 'completed' outcome that the bridge's
+// own cleanup path sets.
+async function markMissedIfAbandoned(sessionId) {
+    const { error } = await supabase
+        .from('call_logs')
+        .update({ status: 'failed' })
+        .eq('session_id', sessionId)
+        .in('status', ['ivr_started', 'input_received', 'queued']);
+    if (error) console.error('❌ Failed to mark abandoned call as failed:', error.message);
+}
+
+// Runs once at startup. This process's in-memory queue/ring-group state
+// always starts empty, so any call_logs row still sitting in a non-terminal
+// status is necessarily orphaned from a previous process instance (crash or
+// deploy restart) — nothing going forward will ever resolve it otherwise,
+// and it would sit in the dashboard's "live" views forever.
+async function reconcileStaleCallsOnStartup() {
+    const { data, error } = await supabase
+        .from('call_logs')
+        .update({ status: 'failed' })
+        .in('status', ['ivr_started', 'input_received', 'queued', 'ongoing'])
+        .select('session_id');
+    if (error) {
+        console.error('❌ Failed to reconcile stale calls on startup:', error.message);
+        return 0;
+    }
+    return data?.length ?? 0;
+}
+
 module.exports = {
     supabase,
     getIvrGreeting,
@@ -98,5 +143,8 @@ module.exports = {
     setAgentStatus,
     getAgentPhone,
     getAgentBySipUsername,
-    getNoAgentsForwardingDestination
+    getNoAgentsForwardingDestination,
+    getBusinessHours,
+    markMissedIfAbandoned,
+    reconcileStaleCallsOnStartup
 };

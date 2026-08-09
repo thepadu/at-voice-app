@@ -11,7 +11,7 @@ import Layout from './components/layout/Layout';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const LiveQueue = lazy(() => import('./pages/LiveQueue'));
-const OutboundMissed = lazy(() => import('./pages/OutboundMissed'));
+const Calls = lazy(() => import('./pages/Calls'));
 const Tickets = lazy(() => import('./pages/Tickets'));
 const Agents = lazy(() => import('./pages/Agents'));
 const IvrEditor = lazy(() => import('./pages/IvrEditor'));
@@ -42,7 +42,8 @@ function AppRoutes() {
             <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/queue" element={<LiveQueue />} />
-                <Route path="/outbound" element={<OutboundMissed />} />
+                <Route path="/calls" element={<Calls />} />
+                <Route path="/outbound" element={<Navigate to="/calls" replace />} />
                 <Route path="/tickets" element={<Tickets />} />
                 <Route
                     path="/agents"

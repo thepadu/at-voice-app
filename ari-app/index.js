@@ -10,7 +10,10 @@ const {
     setAgentStatus,
     getAgentPhone,
     getAgentBySipUsername,
-    getNoAgentsForwardingDestination
+    getNoAgentsForwardingDestination,
+    getBusinessHours,
+    markMissedIfAbandoned,
+    reconcileStaleCallsOnStartup
 } = require('./supabase');
 
 const ARI_URL = process.env.ARI_URL || 'http://127.0.0.1:8088';
@@ -39,6 +42,22 @@ const outboundBySessionId = new Map(); // agent-originated sessionId -> { agentC
 
 let client;
 let holdingBridge;
+
+// Kenya has a single timezone with no DST (EAT, UTC+3) — not worth a tz
+// library dependency for that. active_days is 0=Sunday..6=Saturday.
+function isWithinBusinessHours(hours) {
+    const nairobiNow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    const day = nairobiNow.getUTCDay();
+    if (!hours.active_days.includes(day)) return false;
+
+    const minutesNow = nairobiNow.getUTCHours() * 60 + nairobiNow.getUTCMinutes();
+    const [openH, openM] = hours.open_time.split(':').map(Number);
+    const [closeH, closeM] = hours.close_time.split(':').map(Number);
+    const openMinutes = openH * 60 + openM;
+    const closeMinutes = closeH * 60 + closeM;
+
+    return minutesNow >= openMinutes && minutesNow < closeMinutes;
+}
 
 async function playText(channel, text) {
     const soundName = await synthesize(text);
@@ -137,7 +156,10 @@ async function runIvrMenu(channel, sessionId) {
             const destination = await getNoAgentsForwardingDestination();
             if (destination) {
                 console.log(`↪️  ${sessionId}: no agents online, forwarding to ${destination}`);
-                await upsertCallLog({ session_id: sessionId, status: 'completed' });
+                // 'forwarded', not 'completed' — no Chumz agent actually took
+                // this call, so it belongs in the missed-calls count same as
+                // an abandoned one, just with a distinct, honest reason.
+                await upsertCallLog({ session_id: sessionId, status: 'forwarded' });
                 await channel.setChannelVar({ variable: 'FORWARD_DEST', value: destination });
                 return channel.continueInDialplan({ context: 'forward-external', extension: 's', priority: 1 });
             }
@@ -452,6 +474,16 @@ async function main() {
         try {
             await upsertCallLog({ session_id: sessionId, caller, status: 'ivr_started', direction: 'Inbound' });
             await channel.answer();
+
+            const hours = await getBusinessHours();
+            if (hours?.enabled && !isWithinBusinessHours(hours)) {
+                console.log(`🌙 ${sessionId}: outside business hours, playing after-hours message`);
+                await upsertCallLog({ session_id: sessionId, status: 'after_hours' });
+                await playText(channel, hours.after_hours_message);
+                await channel.hangup().catch(() => {});
+                return;
+            }
+
             await runIvrMenu(channel, sessionId);
         } catch (err) {
             console.error(`❌ Error handling call ${sessionId}:`, err.message);
@@ -471,12 +503,30 @@ async function main() {
         if (ringGroupBySessionId.has(channel.id)) {
             await stopSiblingRings(channel.id, null);
         }
+
+        // Catch-all for "nobody ever picked this up": a call that leaves
+        // Stasis while still sitting in a pre-answer status (never bridged)
+        // is a genuinely missed call — the customer either hung up in the
+        // menu/queue/while ringing, or gave up entirely. The status filter
+        // makes this safe to call unconditionally for every channel
+        // (agent legs, outbound legs, bridged/forwarded/after-hours calls
+        // all have already moved past these statuses, so this is a no-op
+        // for them).
+        await markMissedIfAbandoned(channel.id);
     });
 
     client.on('error', err => console.error('❌ ARI client error:', err.message));
 
     client.start(APP_NAME);
     setInterval(() => tryDequeueNext().catch(err => console.error('❌ Queue poll error:', err.message)), QUEUE_POLL_MS);
+
+    // This process owns zero in-memory state for anything that was already
+    // ivr_started/queued/ongoing before it started — a prior instance's
+    // crash or a routine deploy restart both orphan those rows the same
+    // way. Left alone they'd sit in call_logs looking "live" forever, since
+    // nothing would ever move them to a terminal status again.
+    const reconciled = await reconcileStaleCallsOnStartup();
+    if (reconciled > 0) console.log(`🧹 Reconciled ${reconciled} stale in-progress call(s) from before this restart`);
 
     console.log(`✅ ARI app "${APP_NAME}" connected to ${ARI_URL} and listening`);
 }

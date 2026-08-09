@@ -5,6 +5,9 @@ import { useToast } from '../lib/toast';
 import { useModalA11y } from '../lib/useModalA11y';
 import ConfirmDialog from '../components/ConfirmDialog';
 import StatusPill from '../components/StatusPill';
+import Pagination from '../components/Pagination';
+
+const PAGE_SIZE = 20;
 
 type Agent = {
     id: number;
@@ -27,11 +30,22 @@ export default function Agents() {
     const queryClient = useQueryClient();
     const showToast = useToast();
 
-    const { data: agentsData } = useQuery({ queryKey: ['agents'], queryFn: () => apiFetch('/api/agents') });
-    const { data: statsData } = useQuery({ queryKey: ['agents-stats'], queryFn: () => apiFetch('/api/agents/stats') });
+    const [rosterPage, setRosterPage] = useState(1);
+    const [statsPage, setStatsPage] = useState(1);
+
+    const { data: agentsData } = useQuery({
+        queryKey: ['agents', rosterPage],
+        queryFn: () => apiFetch(`/api/agents?page=${rosterPage}&pageSize=${PAGE_SIZE}`)
+    });
+    const { data: statsData } = useQuery({
+        queryKey: ['agents-stats', statsPage],
+        queryFn: () => apiFetch(`/api/agents/stats?page=${statsPage}&pageSize=${PAGE_SIZE}`)
+    });
 
     const agents: Agent[] = agentsData?.agents ?? [];
+    const rosterTotalPages: number = agentsData?.totalPages ?? 1;
     const stats: AgentStat[] = statsData?.agents ?? [];
+    const statsTotalPages: number = statsData?.totalPages ?? 1;
 
     const [formOpen, setFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
@@ -156,6 +170,7 @@ export default function Agents() {
                         </div>
                     ))}
                 </div>
+                <Pagination page={rosterPage} totalPages={rosterTotalPages} onPageChange={setRosterPage} />
             </div>
 
             <div className="panel">
@@ -185,6 +200,7 @@ export default function Agents() {
                         ))}
                     </tbody>
                 </table>
+                <Pagination page={statsPage} totalPages={statsTotalPages} onPageChange={setStatsPage} />
             </div>
 
             {formOpen && (

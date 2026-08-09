@@ -22,6 +22,7 @@ type Summary = {
     login: number;
     deposit: number;
     agentRequests: number;
+    outbound: number;
     missed: number;
 };
 
@@ -86,6 +87,10 @@ export default function Dashboard() {
                 <div className="card">
                     <div className="card-label">Agent Requests</div>
                     <p>{summary?.agentRequests ?? '—'}</p>
+                </div>
+                <div className="card">
+                    <div className="card-label">Outbound</div>
+                    <p>{summary?.outbound ?? '—'}</p>
                 </div>
                 <div className="card">
                     <div className="card-label">Missed</div>

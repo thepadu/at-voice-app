@@ -9,6 +9,8 @@ const COLORS: Record<string, string> = {
     queued: '#3B82F6',
     dialing: '#3B82F6',
     failed: '#EF4444',
+    forwarded: '#F59E0B',
+    after_hours: '#6B7280',
     open: '#EF4444',
     in_progress: '#F59E0B',
     resolved: '#10B981'

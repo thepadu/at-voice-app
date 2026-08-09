@@ -34,8 +34,14 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         return 'incoming';
     }
 
+    // A call is "missed" if it was made (or forwarded) but no Chumz agent
+    // ever actually picked it up: abandoned before anyone answered
+    // ('failed' — see markMissedIfAbandoned in the ARI app), routed
+    // elsewhere because nobody was online ('forwarded'), or arriving
+    // outside business hours ('after_hours'). All three are distinct
+    // reasons for the same underlying fact.
     function isMissed(row) {
-        return row.status === 'failed';
+        return row.status === 'failed' || row.status === 'forwarded' || row.status === 'after_hours';
     }
 
     // Going "available" means different things depending on how this agent
@@ -126,6 +132,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             login: calls.filter(c => c.option_pressed === '1').length,
             deposit: calls.filter(c => c.option_pressed === '2').length,
             agentRequests: calls.filter(c => c.option_pressed === '3').length,
+            outbound: calls.filter(c => classifyDirection(c) === 'outgoing').length,
             missed: calls.filter(isMissed).length
         };
 
@@ -245,6 +252,15 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // endpoint that was never meant to expose the roster (that's
     // requireSupervisor-gated separately, below).
     app.get('/api/agents/stats', requireAuth, async (req, res) => {
+        // Pagination is opt-in (only kicks in if the caller explicitly asks
+        // for a page) — Dashboard's leaderboard and "my performance" card
+        // both need the *complete* set to sort/look up against correctly,
+        // the same way it always has; only the Agents page's Performance
+        // table asks for a page.
+        const explicitPaging = req.query.page !== undefined || req.query.pageSize !== undefined;
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
+
         const [{ data: callData, error: callError }, { data: agentRows, error: agentError }] = await Promise.all([
             supabase.from('call_logs').select('agent_number, status, duration').not('agent_number', 'is', null),
             supabase.from('agents').select('id, name, phone')
@@ -270,18 +286,30 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             }
         });
 
+        const allAgents = Object.values(stats).map(s => {
+            const agent = nameByPhone.get(s.phone);
+            return {
+                id: agent?.id ?? null,
+                name: agent?.name ?? 'Unknown agent',
+                total: s.total,
+                answered: s.answered,
+                missed: s.missed,
+                avgHandleTime: s.answered ? Math.round(s.durationSum / s.answered) : 0
+            };
+        });
+
+        if (!explicitPaging) {
+            return res.json({ agents: allAgents, page: 1, pageSize: allAgents.length, total: allAgents.length, totalPages: 1 });
+        }
+
+        const rangeStart = (page - 1) * pageSize;
+
         res.json({
-            agents: Object.values(stats).map(s => {
-                const agent = nameByPhone.get(s.phone);
-                return {
-                    id: agent?.id ?? null,
-                    name: agent?.name ?? 'Unknown agent',
-                    total: s.total,
-                    answered: s.answered,
-                    missed: s.missed,
-                    avgHandleTime: s.answered ? Math.round(s.durationSum / s.answered) : 0
-                };
-            })
+            agents: allAgents.slice(rangeStart, rangeStart + pageSize),
+            page,
+            pageSize,
+            total: allAgents.length,
+            totalPages: Math.max(1, Math.ceil(allAgents.length / pageSize))
         });
     });
 
@@ -415,14 +443,28 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // showing it is also hidden from their nav.
 
     app.get('/api/agents', requireSupervisor, async (req, res) => {
-        const { data, error } = await supabase.from('agents').select('*').order('id', { ascending: true });
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
+        const rangeStart = (page - 1) * pageSize;
+
+        const { data, error, count } = await supabase
+            .from('agents')
+            .select('*', { count: 'exact' })
+            .order('id', { ascending: true })
+            .range(rangeStart, rangeStart + pageSize - 1);
 
         if (error) {
             console.error(error);
             return res.status(500).json({ error: 'Failed to load agents' });
         }
 
-        res.json({ agents: data });
+        res.json({
+            agents: data,
+            page,
+            pageSize,
+            total: count ?? 0,
+            totalPages: Math.max(1, Math.ceil((count ?? 0) / pageSize))
+        });
     });
 
     app.post('/api/agents', requireSupervisor, async (req, res) => {
@@ -754,13 +796,12 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     });
 
     // ── Call Forwarding (supervisors only) ──────────────────────────────
-    // NOTE: this is data management only — it is NOT yet wired into actual
-    // call routing. Africa's Talking's Enqueue action has no documented
-    // timeout/max-wait parameter, and there's no API to reach into an
-    // already-queued call to redirect it, so there's currently no confirmed
-    // mechanism to trigger a "no answer" rule automatically. Building that
-    // trigger would mean guessing at undocumented behavior — flagged here
-    // rather than done. See SYSTEM_DESIGN.md.
+    // The ARI app (ari-app/index.js) reuses the 'no_answer' condition's
+    // destination as its "nobody is logged in at all" forwarding target —
+    // checked once at IVR entry, not a live mid-queue redirect. 'busy' and
+    // 'always' are saved here but not yet consulted by anything. 'after_hours'
+    // is superseded by the dedicated Business Hours message below — a rule
+    // saved with that condition is just informational for now.
 
     app.get('/api/forwarding-config', requireSupervisor, async (req, res) => {
         const { data, error } = await supabase.from('forwarding_config').select('enabled').eq('id', 1).single();
@@ -831,6 +872,61 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         }
 
         res.json({ ok: true });
+    });
+
+    // ── Business Hours (supervisors only) ────────────────────────────────
+    // Checked by the ARI app at the start of every inbound call (see
+    // isWithinBusinessHours in ari-app/index.js) — outside these hours, the
+    // caller hears after_hours_message instead of the normal IVR menu.
+
+    app.get('/api/business-hours', requireSupervisor, async (req, res) => {
+        const { data, error } = await supabase.from('business_hours').select('*').eq('id', 1).maybeSingle();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load business hours' });
+        }
+
+        res.json({ hours: data });
+    });
+
+    app.patch('/api/business-hours', requireSupervisor, async (req, res) => {
+        const { enabled, open_time, close_time, active_days, after_hours_message } = req.body;
+
+        const fieldUpdates = {};
+
+        if (enabled !== undefined) fieldUpdates.enabled = !!enabled;
+
+        if (open_time !== undefined) {
+            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(open_time)) return res.status(400).json({ error: 'Invalid open time' });
+            fieldUpdates.open_time = open_time;
+        }
+
+        if (close_time !== undefined) {
+            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(close_time)) return res.status(400).json({ error: 'Invalid close time' });
+            fieldUpdates.close_time = close_time;
+        }
+
+        if (active_days !== undefined) {
+            if (!Array.isArray(active_days) || active_days.some(d => !Number.isInteger(d) || d < 0 || d > 6)) {
+                return res.status(400).json({ error: 'Invalid active days' });
+            }
+            fieldUpdates.active_days = active_days;
+        }
+
+        if (after_hours_message !== undefined) {
+            if (!after_hours_message.trim()) return res.status(400).json({ error: 'After-hours message cannot be empty' });
+            fieldUpdates.after_hours_message = after_hours_message;
+        }
+
+        const { data, error } = await supabase.from('business_hours').update(fieldUpdates).eq('id', 1).select().single();
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to update business hours' });
+        }
+
+        res.json({ hours: data });
     });
 
     // ── Dashboard: calls by hour ─────────────────────────────────────────

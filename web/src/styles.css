@@ -383,6 +383,27 @@ tr:not(:last-child) td {
     border-color: var(--brand-dark);
 }
 
+.calls-filters {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.calls-filters label {
+    margin-bottom: 0;
+}
+
+.calls-filter-caller {
+    flex: 1;
+    min-width: 200px;
+}
+
+.calls-filter-actions {
+    display: flex;
+    gap: 8px;
+}
+
 /* ── Buttons ───────────────────────────────────────────────────────── */
 
 .btn {

@@ -7,7 +7,7 @@ import MyStatusControl from '../widgets/MyStatusControl';
 const TITLES: Record<string, string> = {
     '/': 'Dashboard',
     '/queue': 'Live Queue',
-    '/outbound': 'Outbound & Missed',
+    '/calls': 'Calls',
     '/tickets': 'Tags & Tickets',
     '/agents': 'Agents',
     '/ivr': 'IVR Builder',

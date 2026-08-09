@@ -28,6 +28,10 @@ export default function LiveAnalyticsBadge() {
                         <strong>{summary?.agentRequests ?? '—'}</strong>
                     </div>
                     <div className="analytics-row">
+                        <span>Outbound</span>
+                        <strong>{summary?.outbound ?? '—'}</strong>
+                    </div>
+                    <div className="analytics-row">
                         <span>Missed</span>
                         <strong className="danger-text">{summary?.missed ?? '—'}</strong>
                     </div>
