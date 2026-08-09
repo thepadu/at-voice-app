@@ -1,0 +1,17 @@
+export default function CallsByHourChart({ hours }: { hours: { hour: number; count: number }[] }) {
+    const max = Math.max(1, ...hours.map(h => h.count));
+
+    return (
+        <div className="panel">
+            <h3>Calls by hour</h3>
+            <div className="hour-chart">
+                {hours.map(h => (
+                    <div className="hour-chart-bar-col" key={h.hour}>
+                        <div className="hour-chart-bar" style={{ height: `${Math.round((h.count / max) * 100)}%` }} />
+                        <div className="hour-chart-label">{h.hour % 12 === 0 ? 12 : h.hour % 12}{h.hour < 12 ? 'a' : 'p'}</div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}

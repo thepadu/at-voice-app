@@ -284,7 +284,21 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
 
     await stopSiblingRings(customerSessionId, agentChannel.id);
 
-    await agentChannel.answer();
+    try {
+        await agentChannel.answer();
+    } catch (err) {
+        // The agent rejected, hung up, or the leg failed before actually
+        // connecting. Without this, the customer was stranded forever: the
+        // claim was never released, so no other agent could ever be bridged
+        // to them, they were already dropped from waitingQueue by the
+        // dequeue that started this ring, and nothing would retry them.
+        console.log(`📵 Agent ${agentId} didn't answer ${customerSessionId}: ${err.message}`);
+        claimedSessions.delete(customerSessionId);
+        await agentChannel.hangup().catch(() => {});
+        await setAgentStatus(agentId, 'available');
+        waitingQueue.unshift({ channel: customerChannel, sessionId: customerSessionId, joinedAt: Date.now() });
+        return;
+    }
 
     const bridge = await client.bridges.create({ type: 'mixing' });
     await holdingBridge.removeChannel({ channel: customerChannel.id }).catch(() => {});

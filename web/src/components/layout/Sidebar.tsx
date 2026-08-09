@@ -46,6 +46,9 @@ export default function Sidebar() {
                 </NavLink>
                 {isSupervisor && (
                     <>
+                        <NavLink to="/analytics" className="sidebar-link">
+                            Analytics
+                        </NavLink>
                         <NavLink to="/agents" className="sidebar-link">
                             Agents
                         </NavLink>

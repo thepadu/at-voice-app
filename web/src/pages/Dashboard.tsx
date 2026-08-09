@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import StatusPill from '../components/StatusPill';
+import CallsByHourChart from '../components/CallsByHourChart';
 
 type Call = {
     session_id: string;
@@ -140,7 +142,10 @@ export default function Dashboard() {
 
             {isSupervisor ? (
                 <div className="panel">
-                    <h3>🏆 Top Agents</h3>
+                    <div className="panel-header">
+                        <h3>🏆 Top Agents</h3>
+                        <Link to="/analytics" className="btn-link">Full analytics →</Link>
+                    </div>
                     {leaderboard.length === 0 && <p className="empty">No agent call data yet</p>}
                     {leaderboard.length > 0 && (
                         <table>
@@ -179,24 +184,6 @@ export default function Dashboard() {
                     )}
                 </div>
             )}
-        </div>
-    );
-}
-
-function CallsByHourChart({ hours }: { hours: { hour: number; count: number }[] }) {
-    const max = Math.max(1, ...hours.map(h => h.count));
-
-    return (
-        <div className="panel">
-            <h3>Calls by hour</h3>
-            <div className="hour-chart">
-                {hours.map(h => (
-                    <div className="hour-chart-bar-col" key={h.hour}>
-                        <div className="hour-chart-bar" style={{ height: `${Math.round((h.count / max) * 100)}%` }} />
-                        <div className="hour-chart-label">{h.hour % 12 === 0 ? 12 : h.hour % 12}{h.hour < 12 ? 'a' : 'p'}</div>
-                    </div>
-                ))}
-            </div>
         </div>
     );
 }

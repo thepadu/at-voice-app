@@ -133,7 +133,12 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             deposit: calls.filter(c => c.option_pressed === '2').length,
             agentRequests: calls.filter(c => c.option_pressed === '3').length,
             outbound: calls.filter(c => classifyDirection(c) === 'outgoing').length,
-            missed: calls.filter(isMissed).length
+            missed: calls.filter(isMissed).length,
+            missedByReason: {
+                abandoned: calls.filter(c => c.status === 'failed').length,
+                forwarded: calls.filter(c => c.status === 'forwarded').length,
+                afterHours: calls.filter(c => c.status === 'after_hours').length
+            }
         };
 
         const rangeStart = (page - 1) * pageSize;
@@ -446,12 +451,18 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
         const rangeStart = (page - 1) * pageSize;
+        // Strip characters PostgREST's .or() filter syntax treats as
+        // structural (comma separates conditions, parens group them) —
+        // otherwise a search term containing them would corrupt the filter
+        // string instead of just failing to match anything.
+        const q = (req.query.q || '').trim().replace(/[,()]/g, '');
 
-        const { data, error, count } = await supabase
-            .from('agents')
-            .select('*', { count: 'exact' })
-            .order('id', { ascending: true })
-            .range(rangeStart, rangeStart + pageSize - 1);
+        let query = supabase.from('agents').select('*', { count: 'exact' }).order('id', { ascending: true });
+        // Matches name OR phone — searching against two columns needs an
+        // .or() rather than chained .ilike() calls (which would AND them).
+        if (q) query = query.or(`name.ilike.%${q}%,phone.ilike.%${q}%`);
+
+        const { data, error, count } = await query.range(rangeStart, rangeStart + pageSize - 1);
 
         if (error) {
             console.error(error);

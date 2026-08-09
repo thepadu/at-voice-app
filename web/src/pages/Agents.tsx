@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
 import { useModalA11y } from '../lib/useModalA11y';
@@ -18,8 +19,6 @@ type Agent = {
     role: 'agent' | 'supervisor';
 };
 
-type AgentStat = { id: number | null; name: string; total: number; answered: number; missed: number; avgHandleTime: number };
-
 const EMPTY_FORM = { name: '', phone: '', email: '', role: 'agent' as Agent['role'] };
 
 function initials(name: string) {
@@ -31,21 +30,21 @@ export default function Agents() {
     const showToast = useToast();
 
     const [rosterPage, setRosterPage] = useState(1);
-    const [statsPage, setStatsPage] = useState(1);
+    const [search, setSearch] = useState('');
 
     const { data: agentsData } = useQuery({
-        queryKey: ['agents', rosterPage],
-        queryFn: () => apiFetch(`/api/agents?page=${rosterPage}&pageSize=${PAGE_SIZE}`)
-    });
-    const { data: statsData } = useQuery({
-        queryKey: ['agents-stats', statsPage],
-        queryFn: () => apiFetch(`/api/agents/stats?page=${statsPage}&pageSize=${PAGE_SIZE}`)
+        queryKey: ['agents', rosterPage, search],
+        queryFn: () => apiFetch(`/api/agents?page=${rosterPage}&pageSize=${PAGE_SIZE}&q=${encodeURIComponent(search)}`)
     });
 
     const agents: Agent[] = agentsData?.agents ?? [];
+    const rosterTotal: number = agentsData?.total ?? 0;
     const rosterTotalPages: number = agentsData?.totalPages ?? 1;
-    const stats: AgentStat[] = statsData?.agents ?? [];
-    const statsTotalPages: number = statsData?.totalPages ?? 1;
+
+    function changeSearch(value: string) {
+        setSearch(value);
+        setRosterPage(1);
+    }
 
     const [formOpen, setFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
@@ -120,8 +119,11 @@ export default function Agents() {
         <div>
             <div className="panel">
                 <div className="panel-header">
-                    <h3>👥 Team</h3>
-                    <button className="btn btn-primary" onClick={openAddForm}>+ Add Agent</button>
+                    <h3>👥 Team {rosterTotal > 0 && <span className="hint" style={{ fontWeight: 400 }}>({rosterTotal})</span>}</h3>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <Link to="/analytics" className="btn-link">Performance →</Link>
+                        <button className="btn btn-primary" onClick={openAddForm}>+ Add Agent</button>
+                    </div>
                 </div>
                 <p className="hint">
                     Agents with a browser softphone just go <strong>available</strong> — waiting callers ring
@@ -129,7 +131,16 @@ export default function Agents() {
                     behavior: a real, billed call to their phone to bring them onto the support queue.
                 </p>
 
-                {agents.length === 0 && <p className="empty">No agents yet — add your first one.</p>}
+                <input
+                    value={search}
+                    onChange={e => changeSearch(e.target.value)}
+                    placeholder="Search by name or phone…"
+                    style={{ marginBottom: 14 }}
+                />
+
+                {agents.length === 0 && (
+                    <p className="empty">{search ? `No agents match "${search}".` : 'No agents yet — add your first one.'}</p>
+                )}
 
                 <div className="agent-grid">
                     {agents.map(agent => (
@@ -139,6 +150,7 @@ export default function Agents() {
                                 <div style={{ minWidth: 0 }}>
                                     <div className="agent-card-name">{agent.name}</div>
                                     <div className="agent-card-meta">{agent.phone}</div>
+                                    {agent.email && <div className="agent-card-meta">{agent.email}</div>}
                                 </div>
                             </div>
                             <div className="agent-card-status">
@@ -171,36 +183,6 @@ export default function Agents() {
                     ))}
                 </div>
                 <Pagination page={rosterPage} totalPages={rosterTotalPages} onPageChange={setRosterPage} />
-            </div>
-
-            <div className="panel">
-                <h3>📈 Performance</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Agent</th>
-                            <th>Total Calls</th>
-                            <th>Answered</th>
-                            <th>Missed</th>
-                            <th>Avg Handle Time</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {stats.length === 0 && (
-                            <tr><td colSpan={5} className="empty">No agent call data yet</td></tr>
-                        )}
-                        {stats.map(s => (
-                            <tr key={s.id ?? s.name}>
-                                <td>{s.name}</td>
-                                <td>{s.total}</td>
-                                <td>{s.answered}</td>
-                                <td>{s.missed}</td>
-                                <td>{s.avgHandleTime}s</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                <Pagination page={statsPage} totalPages={statsTotalPages} onPageChange={setStatsPage} />
             </div>
 
             {formOpen && (

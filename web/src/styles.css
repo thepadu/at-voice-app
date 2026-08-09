@@ -445,6 +445,7 @@ tr:not(:last-child) td {
     background: none;
     padding: 4px 8px;
     color: var(--brand);
+    text-decoration: none;
 }
 
 .btn-link-danger {

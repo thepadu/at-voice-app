@@ -208,7 +208,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
     const reject = useCallback(() => {
         if (!incomingCall) return;
-        incomingCall.session.reject().catch(() => {});
+        const { session } = incomingCall;
+        // A plain reject() only works pre-answer — if the session already
+        // raced to Established (e.g. the ARI side answered it a moment
+        // before the click registered), reject() is a no-op/throws and the
+        // call would silently keep running with no banner left to end it.
+        if (session.state === SessionState.Established) session.bye().catch(() => {});
+        else session.reject().catch(() => {});
         setIncomingCall(null);
     }, [incomingCall]);
 
@@ -253,7 +259,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
     const cancelOutgoingCall = useCallback(() => {
         if (!outgoingCall) return;
-        outgoingCall.session.cancel().catch(() => {});
+        const { session } = outgoingCall;
+        // cancel() only works pre-answer. The ARI side answers our own leg
+        // immediately (to give ringback while it dials out separately), so
+        // by the time this fires the session may already be Established —
+        // cancel() would silently fail there and leave the call running.
+        if (session.state === SessionState.Established) session.bye().catch(() => {});
+        else session.cancel().catch(() => {});
         setOutgoingCall(null);
     }, [outgoingCall]);
 

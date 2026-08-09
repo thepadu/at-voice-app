@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const LiveQueue = lazy(() => import('./pages/LiveQueue'));
 const Calls = lazy(() => import('./pages/Calls'));
 const Tickets = lazy(() => import('./pages/Tickets'));
+const Analytics = lazy(() => import('./pages/Analytics'));
 const Agents = lazy(() => import('./pages/Agents'));
 const IvrEditor = lazy(() => import('./pages/IvrEditor'));
 const CallForwarding = lazy(() => import('./pages/CallForwarding'));
@@ -45,6 +46,14 @@ function AppRoutes() {
                 <Route path="/calls" element={<Calls />} />
                 <Route path="/outbound" element={<Navigate to="/calls" replace />} />
                 <Route path="/tickets" element={<Tickets />} />
+                <Route
+                    path="/analytics"
+                    element={
+                        <RequireSupervisor>
+                            <Analytics />
+                        </RequireSupervisor>
+                    }
+                />
                 <Route
                     path="/agents"
                     element={
