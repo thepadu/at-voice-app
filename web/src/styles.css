@@ -1078,31 +1078,64 @@ textarea {
 }
 
 /* ── Incoming call banner ─────────────────────────────────────────── */
+/* Fixed to the viewport (not a flex child of .app-shell, which is why an
+   earlier version rendered as a squeezed sliver between the sidebar and
+   content instead of a real banner) — stays visible regardless of scroll
+   position or which page the agent is on. Deliberately NOT brand-dark green
+   (that's .status-bar's "already on a call" color) — amber/orange reads as
+   "needs attention now" and won't be mistaken for the routine in-call bar. */
 
 .incoming-call-banner {
-    flex-shrink: 0;
-    background: var(--brand-dark);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 500;
+    background: linear-gradient(135deg, #f59e0b, #ea580c);
     color: #fff;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 12px 28px;
-    font-size: 14px;
+    justify-content: center;
+    gap: 28px;
+    padding: 16px 28px;
+    font-size: 15px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+    animation: incoming-call-drop-in 0.25s ease-out, incoming-call-glow 1.4s ease-in-out infinite;
 }
 
+@keyframes incoming-call-drop-in {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
+}
+
+@keyframes incoming-call-glow {
+    0%, 100% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 0 rgba(245, 158, 11, 0.6); }
+    50% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 8px rgba(245, 158, 11, 0); }
+}
+
+/* Extra-insistent variant for when the ringtone couldn't autoplay (no user
+   gesture yet this session) — a faster, more pronounced pulse stands in for
+   the missing sound cue. */
 .incoming-call-banner-pulse {
-    animation: pulse-banner 1s infinite;
-}
-
-@keyframes pulse-banner {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); }
-    50% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+    animation: incoming-call-drop-in 0.25s ease-out, incoming-call-glow 0.7s ease-in-out infinite;
 }
 
 .incoming-call-info {
     display: flex;
     align-items: center;
     gap: 12px;
+    font-weight: 600;
+}
+
+.incoming-call-icon {
+    font-size: 20px;
+    animation: incoming-call-ring 0.8s ease-in-out infinite;
+}
+
+@keyframes incoming-call-ring {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-15deg); }
+    75% { transform: rotate(15deg); }
 }
 
 .incoming-call-actions {
@@ -1111,16 +1144,17 @@ textarea {
 }
 
 .incoming-call-answer {
-    background: var(--brand-bright);
-    color: var(--brand-dark);
-    padding: 6px 18px;
+    background: #fff;
+    color: #ea580c;
+    padding: 8px 22px;
     font-weight: 700;
 }
 
 .incoming-call-reject {
-    background: #ef4444;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.4);
     color: #fff;
-    padding: 6px 18px;
+    padding: 8px 22px;
 }
 
 /* ── Wrap-up modal ─────────────────────────────────────────────────── */

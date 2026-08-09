@@ -71,12 +71,45 @@ function useRingtone(playing: boolean) {
     }, [playing]);
 }
 
+// Requested once, right when a call first rings, rather than proactively at
+// login — asking for notification permission out of the blue (before the
+// agent has any reason to want it) is a common way to get "block" clicked
+// reflexively, which then also blocks it for every future call.
+function useCallNotification(incomingCall: { callerNumber: string } | null) {
+    const shownFor = useRef<string | null>(null);
+
+    useEffect(() => {
+        if (!incomingCall) {
+            shownFor.current = null;
+            return;
+        }
+        // Only worth interrupting the agent if they're not even looking at
+        // this tab — otherwise the banner itself is enough.
+        if (!document.hidden) return;
+        if (shownFor.current === incomingCall.callerNumber) return;
+        shownFor.current = incomingCall.callerNumber;
+
+        if (!('Notification' in window)) return;
+
+        const show = () => new Notification('Incoming call', { body: incomingCall.callerNumber, tag: 'incoming-call' });
+
+        if (Notification.permission === 'granted') {
+            show();
+        } else if (Notification.permission === 'default') {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') show();
+            });
+        }
+    }, [incomingCall]);
+}
+
 export default function IncomingCallBanner() {
     const { incomingCall, answer, reject } = useSoftphone();
     const hasGestured = useHasUserGestured();
     const originalTitle = useRef(document.title);
 
     useRingtone(!!incomingCall && hasGestured);
+    useCallNotification(incomingCall);
 
     useEffect(() => {
         const original = originalTitle.current;
@@ -101,7 +134,7 @@ export default function IncomingCallBanner() {
     return (
         <div className={`incoming-call-banner ${!hasGestured ? 'incoming-call-banner-pulse' : ''}`}>
             <div className="incoming-call-info">
-                <span className="status-bar-dot" />
+                <span className="incoming-call-icon" aria-hidden="true">📞</span>
                 Incoming call from <strong>{incomingCall.callerNumber}</strong>
             </div>
             <div className="incoming-call-actions">
