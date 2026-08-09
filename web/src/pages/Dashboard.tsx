@@ -8,7 +8,14 @@ type Call = {
     caller: string;
     status: string | null;
     created_at: string;
+    direction?: string | null;
+    agent_name?: string | null;
 };
+
+// Keeps the panel a fixed, predictable height instead of growing unbounded
+// as concurrent call volume scales up — the full list is always one click
+// away on the dedicated Live Queue / Calls pages.
+const LIVE_NOW_LIMIT = 8;
 
 type Summary = {
     total: number;
@@ -89,17 +96,35 @@ export default function Dashboard() {
             <CallsByHourChart hours={hourData?.hours ?? []} />
 
             <div className="panel">
-                <h3>🔴 Live Now</h3>
+                <div className="panel-header">
+                    <h3>🔴 Live Now</h3>
+                    {live.length > LIVE_NOW_LIMIT && (
+                        <span className="hint" style={{ margin: 0 }}>
+                            Showing {LIVE_NOW_LIMIT} of {live.length}
+                        </span>
+                    )}
+                </div>
                 {live.length === 0 && <p className="empty">No calls in progress</p>}
                 {live.length > 0 && (
                     <table>
+                        <thead>
+                            <tr>
+                                <th>Caller</th>
+                                <th>Direction</th>
+                                <th>Status</th>
+                                <th>Agent</th>
+                                <th>Started</th>
+                            </tr>
+                        </thead>
                         <tbody>
-                            {live.map(call => (
+                            {live.slice(0, LIVE_NOW_LIMIT).map(call => (
                                 <tr key={call.session_id} className="live-row">
                                     <td>{call.caller}</td>
+                                    <td>{call.direction === 'Outbound' ? '↗ Outbound' : '↙ Inbound'}</td>
                                     <td>
                                         <StatusPill value={call.status ?? 'unknown'} />
                                     </td>
+                                    <td>{call.agent_name ?? '—'}</td>
                                     <td>{new Date(call.created_at).toLocaleTimeString()}</td>
                                 </tr>
                             ))}

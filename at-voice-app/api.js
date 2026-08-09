@@ -9,8 +9,20 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
 
     // A row is a pure agent-leg record (see app.js's /events handler) —
     // exclude it from caller-facing call lists, it only feeds agent stats.
+    // Real outbound calls (agent dialing out via the browser softphone) also
+    // carry agent_number with no option_pressed, but are explicitly tagged
+    // direction='Outbound' and must NOT be swept up by this heuristic.
     function isAgentLegRow(row) {
-        return !!row.agent_number && !row.option_pressed;
+        return !!row.agent_number && !row.option_pressed && row.direction !== 'Outbound';
+    }
+
+    // Cheap enough at this project's scale to just fetch and map by phone
+    // per-request (same pattern GET /api/agents/stats already uses) rather
+    // than a SQL join — the agents table is tiny.
+    async function attachAgentNames(rows) {
+        const { data: agentRows } = await supabase.from('agents').select('phone, name');
+        const nameByPhone = new Map((agentRows || []).map(a => [a.phone, a.name]));
+        return rows.map(row => ({ ...row, agent_name: row.agent_number ? nameByPhone.get(row.agent_number) ?? null : null }));
     }
 
     // Best-effort direction classification. IVR-originated rows often don't
@@ -118,7 +130,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         };
 
         const rangeStart = (page - 1) * pageSize;
-        const pageOfCalls = calls.slice(rangeStart, rangeStart + pageSize);
+        const pageOfCalls = await attachAgentNames(calls.slice(rangeStart, rangeStart + pageSize));
 
         res.json({
             calls: pageOfCalls,
@@ -146,7 +158,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(500).json({ error: 'Failed to load live calls' });
         }
 
-        res.json({ calls: data.filter(row => !isAgentLegRow(row)) });
+        res.json({ calls: await attachAgentNames(data.filter(row => !isAgentLegRow(row))) });
     });
 
     // GET /api/queue — the Live Queue page: this is the design's intended

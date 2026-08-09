@@ -11,6 +11,7 @@ type Call = {
     status: string | null;
     duration: number | null;
     created_at: string;
+    agent_name?: string | null;
 };
 
 type Tab = 'missed' | 'log';
@@ -98,6 +99,7 @@ export default function OutboundMissed() {
                         <thead>
                             <tr>
                                 <th>Number</th>
+                                <th>Agent</th>
                                 <th>Duration</th>
                                 <th>Outcome</th>
                                 <th>Time</th>
@@ -105,11 +107,12 @@ export default function OutboundMissed() {
                         </thead>
                         <tbody>
                             {log.length === 0 && (
-                                <tr><td colSpan={4} className="empty">No outbound calls yet.</td></tr>
+                                <tr><td colSpan={5} className="empty">No outbound calls yet.</td></tr>
                             )}
                             {log.map(call => (
                                 <tr key={call.session_id}>
                                     <td>{call.caller}</td>
+                                    <td>{call.agent_name ?? '—'}</td>
                                     <td>{call.duration ?? 0}s</td>
                                     <td><StatusPill value={call.status ?? 'unknown'} /></td>
                                     <td>{new Date(call.created_at).toLocaleString()}</td>

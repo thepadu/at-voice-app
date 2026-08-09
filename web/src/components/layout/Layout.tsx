@@ -3,6 +3,7 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import StatusBar from '../widgets/StatusBar';
 import IncomingCallBanner from '../widgets/IncomingCallBanner';
+import OutgoingCallBanner from '../widgets/OutgoingCallBanner';
 import WrapUpModal from '../widgets/WrapUpModal';
 import QuickTicketModal from '../widgets/QuickTicketModal';
 import FloatingDialer from '../widgets/FloatingDialer';
@@ -16,6 +17,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="app-shell">
             <Sidebar />
             <IncomingCallBanner />
+            <OutgoingCallBanner />
             <div className="app-shell-main">
                 <Topbar />
                 <StatusBar />

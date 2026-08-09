@@ -822,23 +822,6 @@ textarea {
     color: var(--muted);
 }
 
-.dialer-call-status {
-    position: absolute;
-    bottom: 66px;
-    right: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--brand-dark);
-    color: #fff;
-    padding: 8px 14px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
-}
-
 .dialer-popover-actions .btn {
     flex: 1;
 }
@@ -1151,6 +1134,53 @@ textarea {
 }
 
 .incoming-call-reject {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+    padding: 8px 22px;
+}
+
+/* ── Outgoing call banner ─────────────────────────────────────────── */
+/* Same fixed-to-viewport treatment as the incoming banner, but a calm blue
+   identity — the agent chose to place this call, so it shouldn't compete for
+   attention the way an unprompted incoming ring does. */
+
+.outgoing-call-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 500;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 16px 28px;
+    font-size: 15px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+    animation: incoming-call-drop-in 0.25s ease-out;
+}
+
+.outgoing-call-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 600;
+}
+
+.outgoing-call-icon {
+    font-size: 20px;
+    animation: outgoing-call-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes outgoing-call-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(1.15); }
+}
+
+.outgoing-call-cancel {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.4);
     color: #fff;

@@ -32,8 +32,9 @@ export default function FloatingDialer() {
         try {
             // formatPhone strips the leading "+" (254XXXXXXXXX); the
             // dialplan's outbound pattern expects the full E.164 form.
+            // No toast here — the outgoing-call banner takes over as the
+            // "calling…" feedback the moment placeCall's INVITE goes out.
             await placeCall(`+${phone}`);
-            showToast(`📞 Calling ${phone}`);
             setInput('');
             setOpen(false);
         } catch (err) {

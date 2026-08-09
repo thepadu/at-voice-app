@@ -8,15 +8,18 @@ import { useToast } from './toast';
 type RegistrationState = 'unregistered' | 'registering' | 'registered' | 'failed';
 
 type IncomingCall = { session: Invitation; callerNumber: string };
+type OutgoingCall = { session: Inviter; remoteNumber: string };
 type ActiveCall = { session: Session; remoteNumber: string; muted: boolean; held: boolean; startedAt: number };
 
 type SoftphoneContextValue = {
     registrationState: RegistrationState;
     incomingCall: IncomingCall | null;
+    outgoingCall: OutgoingCall | null;
     activeCall: ActiveCall | null;
     answer: () => Promise<void>;
     reject: () => void;
     hangup: () => void;
+    cancelOutgoingCall: () => void;
     toggleMute: () => void;
     toggleHold: () => void;
     placeCall: (destinationE164: string) => Promise<void>;
@@ -25,10 +28,12 @@ type SoftphoneContextValue = {
 const SoftphoneContext = createContext<SoftphoneContextValue>({
     registrationState: 'unregistered',
     incomingCall: null,
+    outgoingCall: null,
     activeCall: null,
     answer: async () => {},
     reject: () => {},
     hangup: () => {},
+    cancelOutgoingCall: () => {},
     toggleMute: () => {},
     toggleHold: () => {},
     placeCall: async () => {}
@@ -65,6 +70,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
     const [registrationState, setRegistrationState] = useState<RegistrationState>('unregistered');
     const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+    const [outgoingCall, setOutgoingCall] = useState<OutgoingCall | null>(null);
     const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
 
     useEffect(() => {
@@ -245,6 +251,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         setActiveCall({ ...activeCall, held: nextHeld });
     }, [activeCall, showToast]);
 
+    const cancelOutgoingCall = useCallback(() => {
+        if (!outgoingCall) return;
+        outgoingCall.session.cancel().catch(() => {});
+        setOutgoingCall(null);
+    }, [outgoingCall]);
+
     const placeCall = useCallback(
         async (destinationE164: string) => {
             const userAgent = userAgentRef.current;
@@ -256,12 +268,19 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             if (!target) return;
 
             const inviter = new Inviter(userAgent, target);
+            setOutgoingCall({ session: inviter, remoteNumber: destinationE164 });
             wireSessionStateChange(inviter, destinationE164);
+            inviter.stateChange.addListener(state => {
+                if (state === SessionState.Established || state === SessionState.Terminated) {
+                    setOutgoingCall(current => (current?.session === inviter ? null : current));
+                }
+            });
 
             try {
                 await inviter.invite({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } });
             } catch {
                 showToast('Call failed', 'error');
+                setOutgoingCall(current => (current?.session === inviter ? null : current));
             }
         },
         [registrationState, showToast, wireSessionStateChange]
@@ -269,7 +288,19 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
     return (
         <SoftphoneContext.Provider
-            value={{ registrationState, incomingCall, activeCall, answer, reject, hangup, toggleMute, toggleHold, placeCall }}
+            value={{
+                registrationState,
+                incomingCall,
+                outgoingCall,
+                activeCall,
+                answer,
+                reject,
+                hangup,
+                cancelOutgoingCall,
+                toggleMute,
+                toggleHold,
+                placeCall
+            }}
         >
             {children}
         </SoftphoneContext.Provider>

@@ -9,6 +9,7 @@ const {
     getAvailableAgentsWithSip,
     setAgentStatus,
     getAgentPhone,
+    getAgentBySipUsername,
     getNoAgentsForwardingDestination
 } = require('./supabase');
 
@@ -19,6 +20,10 @@ const APP_NAME = process.env.ARI_APP_NAME || 'chumz-ivr';
 const MENU_TIMEOUT_MS = 15000;
 const QUEUE_POLL_MS = 3000;
 const HOLDING_BRIDGE_NAME = 'support-queue';
+// AT's trunk rules explicitly prohibit masking outbound caller ID — every
+// agent-placed call must present the same assigned Voice number, regardless
+// of which agent's endpoint actually placed it.
+const OUTBOUND_CALLER_ID = '0711082161';
 
 // In-memory only — this process is the single, always-running owner of
 // real-time call state (unlike the old Express+Supabase model, which had to
@@ -30,6 +35,7 @@ const waitingQueue = []; // { channel, sessionId, joinedAt }
 const agentLegBySessionId = new Map(); // agent leg channel id -> { channel: customerChannel, sessionId, agentId }
 const ringGroupBySessionId = new Map(); // customer sessionId -> [{ channel: agentChannel, agentId }, ...]
 const claimedSessions = new Set(); // customer sessionIds already won by an agent — guards the simultaneous-answer race
+const outboundBySessionId = new Map(); // agent-originated sessionId -> { agentChannel, destChannel, bridge, bridged, cleaned, answeredAt }
 
 let client;
 let holdingBridge;
@@ -181,6 +187,11 @@ async function dequeueNext() {
     const waiting = waitingQueue.shift();
     console.log(`📲 Ringing ${agents.length} available agent(s) for ${waiting.sessionId}`);
 
+    // The agent's browser should see who's actually calling, not a generic
+    // label — pulled straight off the customer's own channel object, still
+    // in scope from when they first entered Stasis.
+    const customerNumber = normalizePhone(waiting.channel.caller.number) || 'Unknown-Caller';
+
     const ringGroup = [];
 
     await Promise.all(
@@ -195,7 +206,7 @@ async function dequeueNext() {
                     // query params correctly, and a raw space here silently
                     // produces a malformed request ("Allocation failed")
                     // rather than an encoding error.
-                    callerId: 'Support-Queue',
+                    callerId: customerNumber,
                     timeout: 25
                 });
                 agentLegBySessionId.set(agentChannel.id, { channel: waiting.channel, sessionId: waiting.sessionId, agentId: agent.id });
@@ -288,6 +299,122 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
     agentChannel.once('StasisEnd', cleanup);
 }
 
+// ARI channel names look like "PJSIP/simon-00000123" — the part between the
+// slash and the trailing dash is the endpoint name, which doubles as the
+// sip_username the agent registered with.
+function parseSipUsername(channelName) {
+    const match = /^PJSIP\/([^-]+)-/.exec(channelName || '');
+    return match ? match[1] : null;
+}
+
+// An agent's browser dials out by sending a plain SIP INVITE to Asterisk,
+// which the dialplan now routes into this Stasis app instead of a bare
+// Dial() — the only way to actually log the call and know which agent placed
+// it. The agent leg is answered immediately (so their SIP.js session
+// transitions to Established right away) and given a synthesized ring
+// indication while the real destination is dialed out separately; the two
+// are bridged only once the destination genuinely answers, mirroring the
+// same answer-then-bridge sequencing already proven for inbound agent legs.
+async function handleOutboundAgentCall(agentChannel, destination) {
+    const sessionId = agentChannel.id;
+    const calledNumber = normalizePhone(destination);
+    const agentInfo = await getAgentBySipUsername(parseSipUsername(agentChannel.name));
+
+    console.log(`📤 Outbound call ${sessionId}: agent ${agentInfo?.name || 'unknown'} -> ${calledNumber}`);
+
+    await upsertCallLog({
+        session_id: sessionId,
+        caller: calledNumber,
+        direction: 'Outbound',
+        status: 'dialing',
+        agent_number: agentInfo?.phone || null
+    });
+
+    await agentChannel.answer();
+    await agentChannel.ring().catch(() => {});
+
+    const pending = { agentChannel, destChannel: null, bridge: null, bridged: false, cleaned: false, answeredAt: null };
+    outboundBySessionId.set(sessionId, pending);
+
+    agentChannel.once('StasisEnd', () => {
+        finishOutboundCall(sessionId, pending.bridged ? 'completed' : 'failed').catch(err =>
+            console.error('❌ Error finishing outbound call:', err.message)
+        );
+    });
+
+    try {
+        await client.channels.originate({
+            endpoint: `PJSIP/${destination}@at-trunk`,
+            app: APP_NAME,
+            appArgs: `outbound-dest:${sessionId}`,
+            callerId: OUTBOUND_CALLER_ID,
+            timeout: 30
+        });
+    } catch (err) {
+        console.error(`❌ Failed to originate outbound call to ${destination}:`, err.message);
+        await finishOutboundCall(sessionId, 'failed');
+    }
+}
+
+// The destination leg enters Stasis as soon as it starts ringing (well
+// before answer) — bridging happens only once it actually reaches 'Up', so
+// the agent hears the synthesized ring indication (not raw unanswered-bridge
+// audio) for as long as the destination is still ringing.
+async function bridgeOutboundDest(destChannel, sessionId) {
+    const pending = outboundBySessionId.get(sessionId);
+    if (!pending) {
+        await destChannel.hangup().catch(() => {});
+        return;
+    }
+    pending.destChannel = destChannel;
+
+    const onStateChange = () => {
+        if (destChannel.state !== 'Up') return;
+        destChannel.removeListener('ChannelStateChange', onStateChange);
+        completeOutboundBridge(sessionId).catch(err => console.error('❌ Error bridging outbound call:', err.message));
+    };
+    destChannel.on('ChannelStateChange', onStateChange);
+
+    destChannel.once('StasisEnd', () => {
+        destChannel.removeListener('ChannelStateChange', onStateChange);
+        finishOutboundCall(sessionId, pending.bridged ? 'completed' : 'failed').catch(err =>
+            console.error('❌ Error finishing outbound call:', err.message)
+        );
+    });
+}
+
+async function completeOutboundBridge(sessionId) {
+    const pending = outboundBySessionId.get(sessionId);
+    if (!pending || pending.bridged || !pending.destChannel) return;
+    pending.bridged = true;
+    pending.answeredAt = Date.now();
+
+    const bridge = await client.bridges.create({ type: 'mixing' });
+    pending.bridge = bridge;
+    await pending.agentChannel.ringStop().catch(() => {});
+    await bridge.addChannel({ channel: [pending.agentChannel.id, pending.destChannel.id] });
+    await upsertCallLog({ session_id: sessionId, status: 'ongoing' });
+
+    console.log(`🔗 Outbound call bridged: ${sessionId}`);
+}
+
+async function finishOutboundCall(sessionId, status) {
+    const pending = outboundBySessionId.get(sessionId);
+    if (!pending || pending.cleaned) return;
+    pending.cleaned = true;
+    outboundBySessionId.delete(sessionId);
+
+    await pending.agentChannel.ringStop().catch(() => {});
+    if (pending.bridge) await pending.bridge.destroy().catch(() => {});
+    await pending.agentChannel.hangup().catch(() => {});
+    await pending.destChannel?.hangup().catch(() => {});
+
+    const duration = pending.answeredAt ? Math.round((Date.now() - pending.answeredAt) / 1000) : 0;
+    await upsertCallLog({ session_id: sessionId, status, duration });
+
+    console.log(`📴 Outbound call ended: ${sessionId} (${status})`);
+}
+
 async function main() {
     client = await ari.connect(ARI_URL, ARI_USERNAME, ARI_PASSWORD);
 
@@ -298,6 +425,22 @@ async function main() {
             const [, agentId, customerSessionId] = args[0].split(':');
             bridgeAgentLeg(channel, agentId, customerSessionId).catch(err =>
                 console.error('❌ Error bridging agent leg:', err.message)
+            );
+            return;
+        }
+
+        if (args[0] && args[0].startsWith('outbound-agent:')) {
+            const destination = args[0].slice('outbound-agent:'.length);
+            handleOutboundAgentCall(channel, destination).catch(err =>
+                console.error('❌ Error handling outbound call:', err.message)
+            );
+            return;
+        }
+
+        if (args[0] && args[0].startsWith('outbound-dest:')) {
+            const sessionId = args[0].slice('outbound-dest:'.length);
+            bridgeOutboundDest(channel, sessionId).catch(err =>
+                console.error('❌ Error handling outbound destination leg:', err.message)
             );
             return;
         }

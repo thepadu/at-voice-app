@@ -58,6 +58,20 @@ async function getAgentPhone(agentId) {
     return data?.phone ?? null;
 }
 
+async function getAgentBySipUsername(sipUsername) {
+    if (!sipUsername) return null;
+    const { data, error } = await supabase
+        .from('agent_sip_credentials')
+        .select('agents(id, name, phone)')
+        .eq('sip_username', sipUsername)
+        .maybeSingle();
+    if (error) {
+        console.error('❌ Failed to load agent by SIP username:', error.message);
+        return null;
+    }
+    return data?.agents ?? null;
+}
+
 // "No agents online" forwarding — reuses the existing 'no_answer' condition
 // (the closest semantic fit of the four already in the schema; there's no
 // dedicated "nobody logged in" condition) rather than adding a new one.
@@ -83,5 +97,6 @@ module.exports = {
     getAvailableAgentsWithSip,
     setAgentStatus,
     getAgentPhone,
+    getAgentBySipUsername,
     getNoAgentsForwardingDestination
 };
