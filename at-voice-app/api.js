@@ -2,6 +2,12 @@ const { isValidE164 } = require('./lib/phone');
 const { invalidateAgentCache } = require('./lib/agentCache');
 const { placeCall } = require('./lib/voice');
 
+// Must match ari-app/supabase.js's GHOST_AGENT_STALE_MS — this is only used
+// to keep the topbar's "N agents live" count from overcounting a dead tab
+// during the window before that sweep flips it back to offline, not to
+// enforce staleness itself (ari-app owns that).
+const GHOST_AGENT_STALE_MS = 90 * 1000;
+
 // JSON API for the React web app (/web). Mirrors the data shown on the old
 // HTML dashboard (dashboard.js, now removed) but as JSON instead of rendered
 // markup.
@@ -312,9 +318,9 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // roster (which is requireSupervisor-gated below, phone numbers/emails
     // included).
     app.get('/api/agents/available-count', requireAuth, async (req, res) => {
-        const { count, error } = await supabase
+        const { data, error } = await supabase
             .from('agents')
-            .select('id', { count: 'exact', head: true })
+            .select('id, last_seen_at, agent_sip_credentials(sip_username)')
             .eq('status', 'available');
 
         if (error) {
@@ -322,7 +328,18 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(500).json({ error: 'Failed to load agent count' });
         }
 
-        res.json({ count: count ?? 0 });
+        // Mirrors ari-app's ghost-agent staleness check so this badge
+        // doesn't overcount a dead tab for the ~90s window before that
+        // sweep would otherwise flip it back to offline. Agents with no SIP
+        // credentials are on the legacy phone-ring flow and never send a
+        // browser heartbeat at all, so they're not held to this check.
+        const staleBeforeMs = Date.now() - GHOST_AGENT_STALE_MS;
+        const count = data.filter(a => {
+            if (!a.agent_sip_credentials?.sip_username) return true;
+            return a.last_seen_at && new Date(a.last_seen_at).getTime() >= staleBeforeMs;
+        }).length;
+
+        res.json({ count });
     });
 
     // Any authenticated user can see performance numbers (an agent needs
@@ -401,14 +418,21 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Invalid ticket status' });
         }
 
-        const { error } = await supabase
+        const { data, error } = await supabase
             .from('call_logs')
             .update({ ticket_status })
-            .eq('session_id', sessionId);
+            .eq('session_id', sessionId)
+            .select('session_id');
 
         if (error) {
             console.error(error);
             return res.status(500).json({ error: 'Failed to update ticket' });
+        }
+        // Supabase's .update() doesn't error on zero rows matched — without
+        // this check, a stale/mistyped sessionId would report success while
+        // the agent's ticket-status change silently never happened.
+        if (!data.length) {
+            return res.status(404).json({ error: 'Call not found' });
         }
 
         res.json({ ok: true });
@@ -698,14 +722,21 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Greeting cannot be empty' });
         }
 
-        const { error } = await supabase
+        const { data, error } = await supabase
             .from('ivr_config')
             .update({ greeting: greeting.trim(), updated_at: new Date().toISOString() })
-            .eq('id', 1);
+            .eq('id', 1)
+            .select('id');
 
         if (error) {
             console.error(error);
             return res.status(500).json({ error: 'Failed to update greeting' });
+        }
+        // Supabase's .update() doesn't error on zero rows matched — this
+        // would otherwise report success while a supervisor's edited
+        // greeting silently never saved (e.g. the seed row is missing).
+        if (!data.length) {
+            return res.status(500).json({ error: 'IVR config row is missing — contact an engineer' });
         }
 
         res.json({ ok: true });
@@ -936,11 +967,21 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     app.patch('/api/forwarding-config', requireSupervisor, async (req, res) => {
         const { enabled } = req.body;
 
-        const { error } = await supabase.from('forwarding_config').update({ enabled: !!enabled }).eq('id', 1);
+        const { data, error } = await supabase
+            .from('forwarding_config')
+            .update({ enabled: !!enabled })
+            .eq('id', 1)
+            .select('id');
 
         if (error) {
             console.error(error);
             return res.status(500).json({ error: 'Failed to update forwarding config' });
+        }
+        // Supabase's .update() doesn't error on zero rows matched — this
+        // would otherwise report success while a supervisor's toggle
+        // silently never saved (e.g. the seed row is missing).
+        if (!data.length) {
+            return res.status(500).json({ error: 'Forwarding config row is missing — contact an engineer' });
         }
 
         res.json({ ok: true });
