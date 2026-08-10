@@ -1151,7 +1151,7 @@ textarea {
     top: 0;
     left: 0;
     right: 0;
-    z-index: 500;
+    z-index: 800;
     background: linear-gradient(135deg, #FF9800, #F39C12);
     color: #fff;
     display: flex;
@@ -1229,7 +1229,7 @@ textarea {
     top: 0;
     left: 0;
     right: 0;
-    z-index: 500;
+    z-index: 800;
     background: linear-gradient(135deg, #17A697, #2C3E50);
     color: #fff;
     display: flex;
@@ -1348,6 +1348,19 @@ textarea {
         inset: 0;
         background: rgba(0, 0, 0, 0.4);
         z-index: 650;
+    }
+
+    /* The drawer/backdrop sit above ordinary page content (650-700), but a
+       modal or toast represents something the agent still needs to see or
+       act on regardless of drawer state — without this override they'd
+       render underneath the backdrop, invisible and unclickable, if the
+       drawer happened to be left open. */
+    .modal-overlay {
+        z-index: 900;
+    }
+
+    .toast-stack {
+        z-index: 850;
     }
 
     .topbar-menu-btn {

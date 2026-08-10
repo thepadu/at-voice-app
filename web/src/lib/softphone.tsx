@@ -92,6 +92,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const handleSessionTerminated = useCallback(() => {
+        // The <audio> element persists across calls (it's created once per
+        // softphone session, not per call) — if a call ends while still on
+        // hold, its .muted flag would otherwise stay true forever, leaving
+        // the *next* call silent with no error or visual cue.
+        if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
         setActiveCall(null);
     }, []);
 
@@ -138,6 +143,33 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
             let everConnected = false;
 
+            // Shared by the initial registration and every reconnect attempt
+            // below, so a re-register after a dropped connection gets the
+            // exact same failure handling as the first one — previously the
+            // reconnect path fired-and-forgot register() with no onReject
+            // and no catch, so a re-register that actually failed left the
+            // agent silently unreachable with a stale "reconnected" toast as
+            // the last thing they saw.
+            const registerNow = async () => {
+                if (!registererRef.current) return;
+                try {
+                    await registererRef.current.register({
+                        requestDelegate: {
+                            onReject: () => {
+                                setRegistrationState('failed');
+                                showToast('Softphone registration failed — you won’t receive browser calls', 'error');
+                            }
+                        }
+                    });
+                } catch (err) {
+                    console.error('[softphone] registration threw:', err);
+                    if (!cancelled) {
+                        setRegistrationState('failed');
+                        showToast('Softphone registration failed — you won’t receive browser calls', 'error');
+                    }
+                }
+            };
+
             const userAgent = new UserAgent({
                 uri,
                 // keepAliveInterval pings the WebSocket every 30s so idle
@@ -162,8 +194,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                             return;
                         }
                         console.log('[softphone] transport reconnected, re-registering');
-                        showToast('Softphone reconnected', 'success');
-                        registererRef.current?.register().catch(() => {});
+                        registerNow();
                     },
                     onDisconnect: err => {
                         console.warn('[softphone] transport disconnected:', err?.message);
@@ -194,14 +225,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                     if (state === RegistererState.Registered) setRegistrationState('registered');
                     else if (state === RegistererState.Unregistered) setRegistrationState('unregistered');
                 });
-                await registerer.register({
-                    requestDelegate: {
-                        onReject: () => {
-                            setRegistrationState('failed');
-                            showToast('Softphone registration failed — you won’t receive browser calls', 'error');
-                        }
-                    }
-                });
+                await registerNow();
             } catch (err) {
                 console.error('[softphone] registration threw:', err);
                 if (!cancelled) {
@@ -252,6 +276,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         }
     }, [incomingCall, showToast]);
 
+    // The UI always clears its own call state here regardless of whether the
+    // underlying SIP request actually succeeds — leaving a banner/status bar
+    // the agent can't dismiss would be worse than a rare stale server-side
+    // leg. The toast on failure at least tells them it may not have ended
+    // cleanly, instead of failing in total silence.
+    const warnIfCallActionFails = useCallback(
+        () => showToast('That may not have ended cleanly on the network — refresh if audio continues', 'error'),
+        [showToast]
+    );
+
     const reject = useCallback(() => {
         if (!incomingCall) return;
         const { session } = incomingCall;
@@ -259,18 +293,18 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         // raced to Established (e.g. the ARI side answered it a moment
         // before the click registered), reject() is a no-op/throws and the
         // call would silently keep running with no banner left to end it.
-        if (session.state === SessionState.Established) session.bye().catch(() => {});
-        else session.reject().catch(() => {});
+        if (session.state === SessionState.Established) session.bye().catch(warnIfCallActionFails);
+        else session.reject().catch(warnIfCallActionFails);
         setIncomingCall(null);
-    }, [incomingCall]);
+    }, [incomingCall, warnIfCallActionFails]);
 
     const hangup = useCallback(() => {
         if (!activeCall) return;
         const { session } = activeCall;
-        if (session.state === SessionState.Established) session.bye().catch(() => {});
-        else (session as Invitation).reject?.().catch(() => {});
+        if (session.state === SessionState.Established) session.bye().catch(warnIfCallActionFails);
+        else (session as Invitation).reject?.().catch(warnIfCallActionFails);
         setActiveCall(null);
-    }, [activeCall]);
+    }, [activeCall, warnIfCallActionFails]);
 
     const toggleMute = useCallback(() => {
         if (!activeCall) return;
@@ -310,10 +344,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         // immediately (to give ringback while it dials out separately), so
         // by the time this fires the session may already be Established —
         // cancel() would silently fail there and leave the call running.
-        if (session.state === SessionState.Established) session.bye().catch(() => {});
-        else session.cancel().catch(() => {});
+        if (session.state === SessionState.Established) session.bye().catch(warnIfCallActionFails);
+        else session.cancel().catch(warnIfCallActionFails);
         setOutgoingCall(null);
-    }, [outgoingCall]);
+    }, [outgoingCall, warnIfCallActionFails]);
 
     const placeCall = useCallback(
         async (destinationE164: string) => {
