@@ -1,6 +1,5 @@
-// Shared Africa's Talking Voice client. Previously instantiated separately
-// inside outbound.js; now also needed by app.js to place the outbound call
-// that brings an agent onto standby for the hold queue.
+// Africa's Talking Voice client — used by api.js's setAgentStatus to place
+// the outbound call that brings a non-SIP-provisioned agent onto standby.
 const AfricasTalking = require('africastalking');
 
 const africastalking = AfricasTalking({
@@ -31,4 +30,4 @@ async function placeCall(phoneE164, clientRequestId) {
     return voice.call(payload);
 }
 
-module.exports = { placeCall, AT_NUMBER };
+module.exports = { placeCall };

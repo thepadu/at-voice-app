@@ -21,20 +21,4 @@ function normalizePhone(phone) {
     return phone;
 }
 
-// Normalizes to the +-prefixed E.164 form Africa's Talking's Voice API
-// expects for callFrom/callTo/phoneNumbers.
-//
-// NOTE: a bare local-format number ("0712345678") is ambiguous without
-// knowing the country — this assumes Kenya (+254) since that's the only
-// market today. When Rwanda (+250) is added, callers of this function will
-// need a country hint rather than relying on this default.
-function toE164(phone) {
-    if (!phone) return null;
-    phone = phone.replace(/\s+/g, '').trim();
-    if (phone.startsWith('+')) return phone;
-    if (phone.startsWith('254') || phone.startsWith('250')) return '+' + phone;
-    if (phone.startsWith('0')) return '+254' + phone.substring(1);
-    return phone;
-}
-
-module.exports = { isValidE164, normalizePhone, toE164 };
+module.exports = { isValidE164, normalizePhone };

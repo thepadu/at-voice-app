@@ -9,7 +9,6 @@ const { getAgentPhones } = require('./lib/agentCache');
 
 const authRoutes = require('./auth');
 const apiRoutes = require('./api');
-const outboundRoutes = require('./outbound');
 
 // Express 4 does not route a rejected promise from an async route handler
 // to any error middleware — it just becomes an "unhandled rejection" at the
@@ -48,42 +47,12 @@ const supabase = createClient(
 
 const { requireAuth, requireSupervisor } = authRoutes(app, supabase);
 
-const IVR_TIMEOUT = 7;
 const STANDBY_TIMEOUT = 30;
 const QUEUE_NAME = 'support-queue';
 const BASE_URL = 'https://at-voice-app.onrender.com';
 
-// 🔧 IVR menu is dashboard-editable (see api.js) — stored in Supabase's
-// `ivr_config`/`ivr_options` tables (migrations 004) instead of hardcoded
-// here, so changing a prompt doesn't need a code deploy.
-async function getIvrGreeting() {
-    const { data, error } = await supabase.from('ivr_config').select('greeting').eq('id', 1).single();
-
-    if (error) {
-        console.error('❌ Failed to load ivr_config:', error);
-        return 'Welcome to Chumz customer support.';
-    }
-
-    return data.greeting;
-}
-
-async function getIvrOptions() {
-    const { data, error } = await supabase
-        .from('ivr_options')
-        .select('*')
-        .order('digit', { ascending: true });
-
-    if (error) {
-        console.error('❌ Failed to load ivr_options:', error);
-        return [];
-    }
-
-    return data;
-}
-
 // Routes
 apiRoutes(app, supabase, requireAuth, requireSupervisor);
-outboundRoutes(app, supabase, requireAuth);
 
 // Health
 app.get('/', (req, res) => {
@@ -96,25 +65,23 @@ app.get('/dashboard', (req, res) => {
 });
 
 
-// XML-escape dynamic text before embedding it in a voice response — the IVR
-// menu text and agent list are dashboard-editable (by any authenticated
-// supervisor), so someone typing "Terms & Conditions" shouldn't produce
-// invalid XML.
-function escapeXml(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-
-// 🔹 ENTRY — the single voice callback URL configured on the AT account for
-// every call (inbound customer calls AND our own outbound calls, once
-// answered — AT has no per-call callback override, see lib/voice.js).
-// clientRequestId is how we tell an agent-standby call apart from a regular
-// inbound customer call landing here.
+// 🔹 ENTRY — Africa's Talking's account-wide voice callback URL. Real
+// inbound customer calls no longer arrive here at all — they're routed by
+// a SIP trunk directly into the self-hosted Asterisk/ARI stack (see
+// ari-app/), which is why this no longer has an IVR-menu branch (the old
+// /ivr and /handle-input routes, and the ivr_config/ivr_options-reading
+// helpers they used, were removed with it). The only thing that can still
+// reach this URL is our own outbound call to a non-SIP-provisioned agent
+// going "available" (api.js's setAgentStatus, via lib/voice.js) — tagged
+// with clientRequestId `agent-standby:{id}` so it's identifiable here.
+//
+// NOTE: even that fallback is currently a dead end in practice — the
+// standby loop below (`/agent-standby-input`) dequeues from an Africa's
+// Talking `<Enqueue>` queue that only ever got populated by the
+// now-removed /handle-input. Nothing enqueues a caller into it anymore, so
+// an agent in this loop will always hear "No calls waiting." Left in place
+// since ripping it out entirely means deciding what a non-SIP agent going
+// "available" should do instead — a product decision, not a cleanup one.
 app.post('/voice', (req, res) => {
     res.set('Content-Type', 'application/xml');
 
@@ -127,106 +94,8 @@ app.post('/voice', (req, res) => {
             '</Response>');
     }
 
-    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-        '<Response>' +
-            `<Redirect>${BASE_URL}/ivr</Redirect>` +
-        '</Response>');
-});
-
-
-// 🔹 IVR MENU + LOG ENTRY
-app.post('/ivr', async (req, res) => {
-
-    const caller = normalizePhone(req.body.callerNumber);
-    const sessionId = req.body.sessionId;
-
-    // ✅ Log IVR start
-    await supabase.from('call_logs').upsert({
-        session_id: sessionId,
-        caller,
-        status: 'ivr_started'
-    }, { onConflict: 'session_id' });
-
-    const [greeting, options] = await Promise.all([getIvrGreeting(), getIvrOptions()]);
-
-    const menuText = options.length
-        ? `${greeting.trim()} ` + options.map(o => `Press ${o.digit} for ${escapeXml(o.label)}.`).join(' ')
-        : `${greeting.trim()} Our menu is temporarily unavailable, please try again shortly.`;
-
-    res.set('Content-Type', 'application/xml');
-
-    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-        '<Response>' +
-
-            `<GetDigits timeout="${IVR_TIMEOUT}" numDigits="1" callbackUrl="${BASE_URL}/handle-input">` +
-                `<Say>${menuText}</Say>` +
-            '</GetDigits>' +
-
-            '<Say>No option was selected.</Say>' +
-            `<Redirect>${BASE_URL}/ivr</Redirect>` +
-
-        '</Response>');
-});
-
-
-// 🔹 HANDLE INPUT + LOG
-app.post('/handle-input', async (req, res) => {
-
-    const digit = req.body.dtmfDigits || req.body.digits;
-    const caller = normalizePhone(req.body.callerNumber);
-    const sessionId = req.body.sessionId;
-
-    // ✅ Log input
-    await supabase.from('call_logs').upsert({
-        session_id: sessionId,
-        caller,
-        option_pressed: digit,
-        status: 'input_received'
-    }, { onConflict: 'session_id' });
-
-    res.set('Content-Type', 'application/xml');
-
-    const options = await getIvrOptions();
-    const option = options.find(o => o.digit === digit);
-
-    if (!option) {
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-                '<Say>Invalid input. Please try again.</Say>' +
-                `<Redirect>${BASE_URL}/ivr</Redirect>` +
-            '</Response>');
-    }
-
-    if (option.action === 'repeat_menu') {
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-                `<Redirect>${BASE_URL}/ivr</Redirect>` +
-            '</Response>');
-    }
-
-    if (option.action === 'transfer_agent') {
-        // Real hold queue (Enqueue/Dequeue) instead of directly dialing
-        // agents — see SYSTEM_DESIGN.md for why (the only Africa's Talking
-        // browser-calling SDK is an abandoned package; this rests on their
-        // actually-supported phone-based queueing instead).
-        await supabase.from('call_logs').upsert({
-            session_id: sessionId,
-            caller,
-            status: 'queued'
-        }, { onConflict: 'session_id' });
-
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-                `<Say>${escapeXml(option.response_message)}</Say>` +
-                `<Enqueue name="${QUEUE_NAME}"/>` +
-            '</Response>');
-    }
-
-    // action === 'message'
-    return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-        '<Response>' +
-            `<Say>${escapeXml(option.response_message)}</Say>` +
-        '</Response>');
+    // Nothing else should be reaching this URL anymore.
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>');
 });
 
 
@@ -365,27 +234,6 @@ app.post('/events', async (req, res) => {
     }, { onConflict: 'session_id' });
 
     res.sendStatus(200);
-});
-
-
-// 🔹 CSV EXPORT
-app.get('/export', requireAuth, async (req, res) => {
-    const { data, error } = await supabase.from('call_logs').select('*');
-
-    if (error) {
-        console.error(error);
-        return res.status(500).send('Failed to export calls');
-    }
-
-    let csv = 'Caller,Issue,Status,Duration,Time,Ticket\n';
-
-    data.forEach(row => {
-        csv += `${row.caller},${row.option_pressed},${row.status || ''},${row.duration || 0},${row.created_at},${row.ticket_status || 'open'}\n`;
-    });
-
-    res.header('Content-Type', 'text/csv');
-    res.attachment('logs.csv');
-    res.send(csv);
 });
 
 
