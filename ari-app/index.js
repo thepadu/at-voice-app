@@ -13,7 +13,8 @@ const {
     getNoAgentsForwardingDestination,
     getBusinessHours,
     markMissedIfAbandoned,
-    reconcileStaleCallsOnStartup
+    reconcileStaleCallsOnStartup,
+    reconcileGhostAgents
 } = require('./supabase');
 
 const ARI_URL = process.env.ARI_URL || 'http://127.0.0.1:8088';
@@ -22,6 +23,7 @@ const ARI_PASSWORD = process.env.ARI_PASSWORD;
 const APP_NAME = process.env.ARI_APP_NAME || 'chumz-ivr';
 const MENU_TIMEOUT_MS = 15000;
 const QUEUE_POLL_MS = 3000;
+const GHOST_AGENT_POLL_MS = 30000;
 const HOLDING_BRIDGE_NAME = 'support-queue';
 // AT's trunk rules explicitly prohibit masking outbound caller ID — every
 // agent-placed call must present the same assigned Voice number, regardless
@@ -534,6 +536,22 @@ async function main() {
     client.start(APP_NAME);
     setInterval(() => tryDequeueNext().catch(err => console.error('❌ Queue poll error:', err.message)), QUEUE_POLL_MS);
 
+    // "Ghost agents" — status says available/ringing but the browser
+    // heartbeat behind it has gone stale (or never existed at all, e.g. a
+    // row seeded/provisioned with status='available' that nobody ever
+    // actually logged into) — see reconcileGhostAgents for the full
+    // rationale. Checked continuously, not just at startup, since most
+    // ghosts are created by a tab dying mid-session, not by a restart.
+    setInterval(
+        () =>
+            reconcileGhostAgents()
+                .then(count => {
+                    if (count > 0) console.log(`👻 Reconciled ${count} ghost agent(s) back to offline`);
+                })
+                .catch(err => console.error('❌ Ghost agent poll error:', err.message)),
+        GHOST_AGENT_POLL_MS
+    );
+
     // This process owns zero in-memory state for anything that was already
     // ivr_started/queued/ongoing before it started — a prior instance's
     // crash or a routine deploy restart both orphan those rows the same
@@ -541,6 +559,9 @@ async function main() {
     // nothing would ever move them to a terminal status again.
     const reconciled = await reconcileStaleCallsOnStartup();
     if (reconciled > 0) console.log(`🧹 Reconciled ${reconciled} stale in-progress call(s) from before this restart`);
+
+    const ghostsReconciled = await reconcileGhostAgents();
+    if (ghostsReconciled > 0) console.log(`👻 Reconciled ${ghostsReconciled} ghost agent(s) back to offline on startup`);
 
     console.log(`✅ ARI app "${APP_NAME}" connected to ${ARI_URL} and listening`);
 }

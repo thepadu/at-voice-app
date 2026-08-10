@@ -221,6 +221,24 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.agentId]);
 
+    // Tells the server "this browser is genuinely still connected" —
+    // without it, agents.status='available' is just an unverified claim.
+    // A dead tab, a lost connection, or a row seeded/provisioned as
+    // available with nobody ever having logged in all look identical to
+    // the rest of the app unless something actively confirms the opposite.
+    // The ARI app flips anyone whose heartbeat goes stale back to offline
+    // (see reconcileGhostAgents) — this is the signal that makes that safe.
+    useEffect(() => {
+        if (registrationState !== 'registered') return;
+
+        const sendHeartbeat = () => {
+            apiFetch('/api/agents/me/heartbeat', { method: 'PATCH' }).catch(() => {});
+        };
+        sendHeartbeat();
+        const interval = setInterval(sendHeartbeat, 20000);
+        return () => clearInterval(interval);
+    }, [registrationState]);
+
     const answer = useCallback(async () => {
         if (!incomingCall) return;
         try {

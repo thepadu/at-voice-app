@@ -56,8 +56,13 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     //    phone-standby hold-queue loop (see app.js's /agent-standby), so
     //    nothing already depending on that path breaks.
     async function setAgentStatus(agent, status) {
+        // Any explicit status change is a live signal that someone (the
+        // agent themselves, or a supervisor confirming it by hand) has just
+        // touched this — reset the staleness clock so a fresh "available"
+        // isn't immediately swept back to offline by reconcileGhostAgents
+        // before the next heartbeat lands.
         if (status !== 'available') {
-            return supabase.from('agents').update({ status }).eq('id', agent.id).select().single();
+            return supabase.from('agents').update({ status, last_seen_at: new Date().toISOString() }).eq('id', agent.id).select().single();
         }
 
         const { data: sipCreds } = await supabase
@@ -67,7 +72,12 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             .maybeSingle();
 
         if (sipCreds) {
-            return supabase.from('agents').update({ status: 'available' }).eq('id', agent.id).select().single();
+            return supabase
+                .from('agents')
+                .update({ status: 'available', last_seen_at: new Date().toISOString() })
+                .eq('id', agent.id)
+                .select()
+                .single();
         }
 
         await supabase.from('agents').update({ status: 'ringing' }).eq('id', agent.id);
@@ -368,6 +378,26 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         } catch (err) {
             res.status(502).json({ error: err.message });
         }
+    });
+
+    // Sent every ~20s by the browser softphone while its WebRTC registration
+    // is live (see softphone.tsx) — this is what lets reconcileGhostAgents
+    // (ari-app) tell a genuinely-connected "available" agent apart from one
+    // whose status is stale left over from a dead tab, a lost connection, or
+    // just how the row was seeded/provisioned. Not requireSupervisor — an
+    // agent calling this only ever touches their own row.
+    app.patch('/api/agents/me/heartbeat', requireAuth, async (req, res) => {
+        const { error } = await supabase
+            .from('agents')
+            .update({ last_seen_at: new Date().toISOString() })
+            .eq('email', req.user.email);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to record heartbeat' });
+        }
+
+        res.json({ ok: true });
     });
 
     // Name-only list any authenticated user can fetch — enough to populate

@@ -134,6 +134,51 @@ async function reconcileStaleCallsOnStartup() {
     return data?.length ?? 0;
 }
 
+// "Ghost agent" fix: agents.status alone is never trustworthy on its own —
+// a row seeded/provisioned with status='available' that nobody ever
+// actually logged into, or a browser tab that died without a clean logout,
+// stays "available" forever with nothing to correct it, and the dashboard
+// (and ring-all) both trust it blindly. last_seen_at is stamped by the
+// browser's heartbeat (PATCH /api/agents/me/heartbeat, sent every ~20s
+// while the softphone is registered) and by any explicit status change —
+// anyone claiming to be available/ringing without a recent heartbeat is
+// flipped back to offline. Scoped to agents with SIP credentials only:
+// agents still on the old real-phone-ring flow don't run a browser
+// heartbeat at all, and "available" legitimately doesn't require one for them.
+const GHOST_AGENT_STALE_MS = 90 * 1000;
+
+async function reconcileGhostAgents() {
+    // Compared as epoch millis, not raw strings — Postgres/PostgREST's
+    // "+00:00" suffix and JS's own toISOString() "Z" suffix don't sort
+    // consistently against each other as plain strings.
+    const staleBeforeMs = Date.now() - GHOST_AGENT_STALE_MS;
+
+    const { data, error } = await supabase
+        .from('agents')
+        .select('id, last_seen_at, agent_sip_credentials(sip_username)')
+        .in('status', ['available', 'ringing']);
+
+    if (error) {
+        console.error('❌ Failed to check for ghost agents:', error.message);
+        return 0;
+    }
+
+    const staleIds = data
+        .filter(a => a.agent_sip_credentials?.sip_username)
+        .filter(a => !a.last_seen_at || new Date(a.last_seen_at).getTime() < staleBeforeMs)
+        .map(a => a.id);
+
+    if (staleIds.length === 0) return 0;
+
+    const { error: updateError } = await supabase.from('agents').update({ status: 'offline' }).in('id', staleIds);
+    if (updateError) {
+        console.error('❌ Failed to reconcile ghost agents:', updateError.message);
+        return 0;
+    }
+
+    return staleIds.length;
+}
+
 module.exports = {
     supabase,
     getIvrGreeting,
@@ -146,5 +191,6 @@ module.exports = {
     getNoAgentsForwardingDestination,
     getBusinessHours,
     markMissedIfAbandoned,
-    reconcileStaleCallsOnStartup
+    reconcileStaleCallsOnStartup,
+    reconcileGhostAgents
 };
