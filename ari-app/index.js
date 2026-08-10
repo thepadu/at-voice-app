@@ -349,10 +349,12 @@ function parseSipUsername(channelName) {
 // which the dialplan now routes into this Stasis app instead of a bare
 // Dial() — the only way to actually log the call and know which agent placed
 // it. The agent leg is answered immediately (so their SIP.js session
-// transitions to Established right away) and given a synthesized ring
-// indication while the real destination is dialed out separately; the two
-// are bridged only once the destination genuinely answers, mirroring the
-// same answer-then-bridge sequencing already proven for inbound agent legs.
+// transitions to Established right away) while the real destination is
+// dialed out separately; the two are bridged only once the destination
+// genuinely answers, mirroring the same answer-then-bridge sequencing
+// already proven for inbound agent legs. No ring-indication tone here (an
+// earlier version tried channel.ring() on the already-answered agent leg —
+// untested combination on a WebRTC channel, and not worth the risk).
 async function handleOutboundAgentCall(agentChannel, destination) {
     const sessionId = agentChannel.id;
     const calledNumber = normalizePhone(destination);
@@ -369,7 +371,6 @@ async function handleOutboundAgentCall(agentChannel, destination) {
     });
 
     await agentChannel.answer();
-    await agentChannel.ring().catch(() => {});
 
     const pending = { agentChannel, destChannel: null, bridge: null, bridged: false, cleaned: false, answeredAt: null };
     outboundBySessionId.set(sessionId, pending);
@@ -395,9 +396,7 @@ async function handleOutboundAgentCall(agentChannel, destination) {
 }
 
 // The destination leg enters Stasis as soon as it starts ringing (well
-// before answer) — bridging happens only once it actually reaches 'Up', so
-// the agent hears the synthesized ring indication (not raw unanswered-bridge
-// audio) for as long as the destination is still ringing.
+// before answer) — bridging happens only once it actually reaches 'Up'.
 async function bridgeOutboundDest(destChannel, sessionId) {
     const pending = outboundBySessionId.get(sessionId);
     if (!pending) {
@@ -406,8 +405,16 @@ async function bridgeOutboundDest(destChannel, sessionId) {
     }
     pending.destChannel = destChannel;
 
-    const onStateChange = () => {
-        if (destChannel.state !== 'Up') return;
+    // ari-client's resource.on() callback receives a freshly-constructed
+    // channel object per event, built straight from that event's payload —
+    // it is NOT the same object as the `destChannel` closed over above, and
+    // that outer reference's .state never updates in place. Reading
+    // `destChannel.state` here always saw whatever state the channel was in
+    // at StasisStart (never 'Up'), so this never fired: the bridge never
+    // formed, the agent never heard the caller, and the call sat "connected"
+    // with nothing actually connected until the caller gave up and hung up.
+    const onStateChange = (event, updatedChannel) => {
+        if (updatedChannel.state !== 'Up') return;
         destChannel.removeListener('ChannelStateChange', onStateChange);
         completeOutboundBridge(sessionId).catch(err => console.error('❌ Error bridging outbound call:', err.message));
     };
@@ -429,7 +436,6 @@ async function completeOutboundBridge(sessionId) {
 
     const bridge = await client.bridges.create({ type: 'mixing' });
     pending.bridge = bridge;
-    await pending.agentChannel.ringStop().catch(() => {});
     await bridge.addChannel({ channel: [pending.agentChannel.id, pending.destChannel.id] });
     await upsertCallLog({ session_id: sessionId, status: 'ongoing' });
 
@@ -442,7 +448,6 @@ async function finishOutboundCall(sessionId, status) {
     pending.cleaned = true;
     outboundBySessionId.delete(sessionId);
 
-    await pending.agentChannel.ringStop().catch(() => {});
     if (pending.bridge) await pending.bridge.destroy().catch(() => {});
     await pending.agentChannel.hangup().catch(() => {});
     await pending.destChannel?.hangup().catch(() => {});
