@@ -12,7 +12,9 @@ function initials(name: string) {
         .slice(0, 2);
 }
 
-export default function Sidebar() {
+type SidebarProps = { open: boolean; onClose: () => void };
+
+export default function Sidebar({ open, onClose }: SidebarProps) {
     const { user, isSupervisor } = useAuth();
 
     const { data: queueData } = useQuery({
@@ -24,13 +26,16 @@ export default function Sidebar() {
     const inQueue = queueData?.stats?.inQueue ?? 0;
 
     return (
-        <aside className="sidebar">
+        <aside className={`sidebar ${open ? 'sidebar-open' : ''}`}>
             <div className="sidebar-logo">
                 <div className="logo-mark">C</div>
                 <span>Chumz</span>
             </div>
 
-            <nav className="sidebar-nav">
+            {/* One handler on the nav catches every link click via bubbling
+                — closes the mobile drawer on navigation without wiring
+                onClick into each individual NavLink. */}
+            <nav className="sidebar-nav" onClick={onClose}>
                 <NavLink to="/" end className="sidebar-link">
                     Dashboard
                 </NavLink>

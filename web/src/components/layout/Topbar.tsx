@@ -15,7 +15,7 @@ const TITLES: Record<string, string> = {
     '/forwarding': 'Call Forwarding'
 };
 
-export default function Topbar() {
+export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     const location = useLocation();
     const { darkMode, toggleDarkMode } = useTheme();
 
@@ -29,7 +29,12 @@ export default function Topbar() {
 
     return (
         <header className="topbar">
-            <div className="topbar-title">{title}</div>
+            <div className="topbar-left">
+                <button className="topbar-menu-btn" onClick={onMenuClick} aria-label="Open menu">
+                    ☰
+                </button>
+                <div className="topbar-title">{title}</div>
+            </div>
             <div className="topbar-right">
                 <div className="topbar-search">
                     <span className="topbar-search-icon" aria-hidden="true">
