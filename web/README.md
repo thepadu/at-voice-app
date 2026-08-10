@@ -23,7 +23,7 @@ npm start
 npm run dev
 ```
 
-Vite's dev server proxies `/api`, `/call`, `/login`, `/auth`, `/logout` to `http://localhost:3000` (see `vite.config.ts`), so you get instant reload on the React side while auth and data still come from the real Express server.
+Vite's dev server proxies `/api`, `/login`, `/auth`, `/logout` to `http://localhost:3000` (see `vite.config.ts`), so you get instant reload on the React side while auth and data still come from the real Express server. Real calls (the softphone, ring-all, etc.) need the actual Asterisk VPS and won't work against a bare local Express server — see `SYSTEM_DESIGN.md`.
 
 Sign in by visiting `http://localhost:3000/login` first (this sets the session cookie), then open the Vite dev URL — the cookie is shared since both are `localhost`.
 
@@ -45,6 +45,8 @@ Outputs to `web/dist`, which `at-voice-app/app.js` serves at `/app` (e.g. `https
 
 ## What's here
 
-Full sidebar IA: Dashboard (KPIs, calls-by-hour chart, live calls, leaderboard/own performance), Live Queue (who's on hold, SLA-colored wait times), Outbound & Missed (call back / outbound log), Tags & Tickets (real ticket entity — tags, priority, assignee, notes), Agents (supervisors only — 4-state presence, roster CRUD), IVR Builder (supervisors only — greeting + menu + live preview), Call Forwarding (supervisors only — rules saved but not yet wired into live routing, see `SYSTEM_DESIGN.md`). A real active-call status bar, a wrap-up prompt, `T`/`E` keyboard shortcuts, floating dialer + live-analytics popover on every page. Role-gated via `useAuth().isSupervisor` on the frontend and `requireSupervisor` on the backend (the real boundary is server-side).
+Full sidebar IA: Dashboard (KPIs, calls-by-hour chart, capped live-calls panel, leaderboard/own performance), Live Queue (who's on hold, SLA-colored wait times), Calls (Incoming/Outbound/Missed tabs, date-range + caller filters, pagination, one-click callback with a "called back" indicator), Tags & Tickets (real ticket entity — tags, priority, assignee, notes), Analytics (supervisors only — today's totals, missed-call breakdown, full performance leaderboard), Agents (supervisors only — 5-state presence, roster CRUD, name/phone search), IVR Builder (supervisors only — greeting + menu + live preview), Call Forwarding (supervisors only — Business Hours panel plus forwarding rules; only the `no_answer` rule is actually wired into live routing, see `SYSTEM_DESIGN.md`).
 
-Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent to the existing `/login` HTML hero page), live call-forwarding routing, a browser softphone (deliberately not pursued — see `SYSTEM_DESIGN.md`), multi-country support.
+The floating dialer and status bar drive a **real** SIP.js WebRTC softphone (`lib/softphone.tsx`) registered directly to Asterisk — not a placeholder. It handles incoming/outgoing/active call state, automatic reconnection if the connection drops, and a presence heartbeat the backend uses to tell a genuinely-connected agent apart from a stale one. A real active-call status bar, a wrap-up prompt, `T`/`E` keyboard shortcuts, live-analytics popover on every page. Role-gated via `useAuth().isSupervisor` on the frontend and `requireSupervisor` on the backend (the real boundary is server-side).
+
+Not built: a client-side login page (real Google OAuth requires a full-page redirect anyway, so unauthenticated users are sent to the existing `/login` HTML hero page), live routing for `busy`/`always` forwarding conditions, multi-country support.
