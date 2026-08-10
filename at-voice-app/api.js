@@ -394,10 +394,11 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         res.json({ ok: true });
     });
 
-    // Lets an agent flip their own presence without knowing their agent id —
-    // only works if their agents.email matches their Google login. Agents
-    // seeded without a matching email need a supervisor to set their status
-    // via the roster endpoints below instead, until their email is linked.
+    // Lets an agent flip their own presence without needing to already know
+    // their agent id — resolved from the JWT's baked-in agentId (set once
+    // at login) when present, falling back to an email match for sessions
+    // issued before that existed. Agents with neither linked need a
+    // supervisor to set their status via the roster endpoints instead.
     app.patch('/api/agents/me/status', requireAuth, async (req, res) => {
         const { status } = req.body;
 
@@ -405,11 +406,10 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Invalid status' });
         }
 
-        const { data: agent, error: lookupError } = await supabase
-            .from('agents')
-            .select()
-            .eq('email', req.user.email)
-            .single();
+        const agentQuery = req.user.agentId
+            ? supabase.from('agents').select().eq('id', req.user.agentId)
+            : supabase.from('agents').select().ilike('email', req.user.email);
+        const { data: agent, error: lookupError } = await agentQuery.maybeSingle();
 
         if (lookupError || !agent) {
             return res.status(404).json({ error: 'No agent record linked to your account yet' });
@@ -432,10 +432,17 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // just how the row was seeded/provisioned. Not requireSupervisor — an
     // agent calling this only ever touches their own row.
     app.patch('/api/agents/me/heartbeat', requireAuth, async (req, res) => {
-        const { error } = await supabase
-            .from('agents')
-            .update({ last_seen_at: new Date().toISOString() })
-            .eq('email', req.user.email);
+        // update() matching zero rows is not an error as far as Supabase is
+        // concerned — an email mismatch here would silently no-op forever,
+        // which is exactly what happened before this used agentId: the
+        // heartbeat "succeeded" on every call while never actually touching
+        // any row, so reconcileGhostAgents (ari-app) kept correctly-per-its-
+        // own-logic flipping a genuinely-connected agent back to offline
+        // every ~90s, since nothing was ever refreshing last_seen_at.
+        const query = req.user.agentId
+            ? supabase.from('agents').update({ last_seen_at: new Date().toISOString() }).eq('id', req.user.agentId)
+            : supabase.from('agents').update({ last_seen_at: new Date().toISOString() }).ilike('email', req.user.email);
+        const { error } = await query;
 
         if (error) {
             console.error(error);
@@ -465,7 +472,10 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // phone (see app.js) — this just looks that row up by the agent's own
     // linked phone number.
     app.get('/api/agents/me/active-call', requireAuth, async (req, res) => {
-        const { data: agent } = await supabase.from('agents').select('phone, status').eq('email', req.user.email).maybeSingle();
+        const agentQuery = req.user.agentId
+            ? supabase.from('agents').select('phone, status').eq('id', req.user.agentId)
+            : supabase.from('agents').select('phone, status').ilike('email', req.user.email);
+        const { data: agent } = await agentQuery.maybeSingle();
 
         if (!agent) {
             return res.json({ call: null, agentStatus: null });
@@ -488,7 +498,10 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // in its own table (not columns on `agents`) since they're a more
     // sensitive device secret than anything else exposed about an agent.
     app.get('/api/agents/me/sip-credentials', requireAuth, async (req, res) => {
-        const { data: agent } = await supabase.from('agents').select('id').eq('email', req.user.email).maybeSingle();
+        const agentQuery = req.user.agentId
+            ? supabase.from('agents').select('id').eq('id', req.user.agentId)
+            : supabase.from('agents').select('id').ilike('email', req.user.email);
+        const { data: agent } = await agentQuery.maybeSingle();
 
         if (!agent) {
             return res.status(404).json({ error: 'No agent record linked to your account yet' });

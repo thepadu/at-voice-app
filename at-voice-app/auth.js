@@ -233,6 +233,20 @@ module.exports = function (app, supabase) {
                 return res.status(403).send('Your Google account email is not verified');
             }
 
+            // Lowercased once, used everywhere below — agents.email has a
+            // case-sensitive unique constraint, and Google's own payload.email
+            // casing isn't guaranteed stable. Without this, a login whose
+            // casing didn't byte-for-byte match however an agent's row was
+            // originally provisioned (typed by hand during onboarding, for
+            // instance) found no match here, fell into the "unrecognized
+            // login" branch below, and silently created a brand-new
+            // duplicate row — offline, no phone, no SIP credentials — while
+            // the real row (with working SIP creds) sat untouched. The
+            // agent's dashboard session then pointed at the empty duplicate
+            // for its entire lifetime, showing "offline" no matter what
+            // their actual, working softphone was doing.
+            const loginEmail = payload.email.toLowerCase();
+
             // Look up whether this email is a recognized agent, and if so
             // what role/id they hold. Unrecognized emails default to 'agent'
             // (the more restricted role) rather than failing login — login
@@ -242,7 +256,7 @@ module.exports = function (app, supabase) {
             let { data: agent } = await supabase
                 .from('agents')
                 .select('id, role')
-                .eq('email', payload.email)
+                .ilike('email', loginEmail)
                 .maybeSingle();
 
             // First time this email has ever logged in — create their roster
@@ -253,12 +267,12 @@ module.exports = function (app, supabase) {
             // sets one — they can't go "available" until then, but the row
             // itself needs to exist regardless.
             if (!agent) {
-                const role = supervisorEmails.includes(payload.email.toLowerCase()) ? 'supervisor' : 'agent';
+                const role = supervisorEmails.includes(loginEmail) ? 'supervisor' : 'agent';
 
                 const { data: created, error: createError } = await supabase
                     .from('agents')
                     .upsert(
-                        { email: payload.email, name: payload.name, status: 'offline', role },
+                        { email: loginEmail, name: payload.name, status: 'offline', role },
                         { onConflict: 'email' }
                     )
                     .select('id, role')
@@ -274,7 +288,7 @@ module.exports = function (app, supabase) {
             const role = agent?.role === 'supervisor' ? 'supervisor' : 'agent';
 
             const sessionToken = jwt.sign(
-                { email: payload.email, name: payload.name, role, agentId: agent?.id ?? null },
+                { email: loginEmail, name: payload.name, role, agentId: agent?.id ?? null },
                 process.env.JWT_SECRET,
                 { expiresIn: '7d' }
             );
