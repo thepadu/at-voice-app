@@ -30,6 +30,7 @@ const {
     getBusinessHours,
     markMissedIfAbandoned,
     reconcileStaleCallsOnStartup,
+    reconcileStaleAgentsOnStartup,
     reconcileGhostAgents
 } = require('./supabase');
 
@@ -60,6 +61,7 @@ const outboundBySessionId = new Map(); // agent-originated sessionId -> { agentC
 
 let client;
 let holdingBridge;
+let holdingBridgeCreation; // in-flight bridges.create() promise — see getHoldingBridge
 
 // Kenya has a single timezone with no DST (EAT, UTC+3) — not worth a tz
 // library dependency for that. active_days is 0=Sunday..6=Saturday.
@@ -120,6 +122,10 @@ function waitForDigitOrTimeout(channelId, timeoutMs) {
     return { promise, cancel: cleanup };
 }
 
+// Two customers can both call this before either has set `holdingBridge` —
+// without a lock, each would create its own bridge and only one would ever
+// be remembered, orphaning whichever customer ended up in the other one.
+// Concurrent callers now await the same in-flight creation instead of racing.
 async function getHoldingBridge() {
     if (holdingBridge) {
         try {
@@ -129,7 +135,14 @@ async function getHoldingBridge() {
             holdingBridge = null;
         }
     }
-    holdingBridge = await client.bridges.create({ type: 'holding', name: HOLDING_BRIDGE_NAME });
+    if (!holdingBridgeCreation) {
+        holdingBridgeCreation = client.bridges
+            .create({ type: 'holding', name: HOLDING_BRIDGE_NAME })
+            .finally(() => {
+                holdingBridgeCreation = null;
+            });
+    }
+    holdingBridge = await holdingBridgeCreation;
     return holdingBridge;
 }
 
@@ -237,6 +250,13 @@ async function dequeueNext() {
     const customerNumber = normalizePhone(waiting.channel.caller.number) || 'Unknown-Caller';
 
     const ringGroup = [];
+    // Registered before origination starts, not after every originate()
+    // resolves — the global StasisEnd handler below looks up this map to
+    // stop sibling rings the instant the customer hangs up, and origination
+    // can take a couple seconds across several agents. Populating it only
+    // at the end left a customer hangup during that window with nothing to
+    // find, so already-ringing agents kept ringing for someone who'd left.
+    ringGroupBySessionId.set(waiting.sessionId, ringGroup);
 
     await Promise.all(
         agents.map(async agent => {
@@ -263,11 +283,9 @@ async function dequeueNext() {
     );
 
     if (ringGroup.length === 0) {
+        ringGroupBySessionId.delete(waiting.sessionId);
         waitingQueue.unshift(waiting); // nobody could actually be reached — retry next tick
-        return;
     }
-
-    ringGroupBySessionId.set(waiting.sessionId, ringGroup);
 }
 
 // Hangs up every ringing leg except the winner and reverts their agent
@@ -306,6 +324,17 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
 
     await stopSiblingRings(customerSessionId, agentChannel.id);
 
+    // Catches the customer hanging up in the narrow window while we're still
+    // awaiting the agent's answer() below — the real cleanup listeners aren't
+    // attached until after answer() succeeds, so without this a hangup here
+    // would only ever surface later as a failed bridge.addChannel once the
+    // agent's leg tries to connect to an already-gone customer channel.
+    let customerHungUpEarly = false;
+    const onEarlyCustomerHangup = () => {
+        customerHungUpEarly = true;
+    };
+    customerChannel.once('StasisEnd', onEarlyCustomerHangup);
+
     try {
         await agentChannel.answer();
     } catch (err) {
@@ -315,10 +344,22 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         // to them, they were already dropped from waitingQueue by the
         // dequeue that started this ring, and nothing would retry them.
         console.log(`📵 Agent ${agentId} didn't answer ${customerSessionId}: ${err.message}`);
+        customerChannel.removeListener('StasisEnd', onEarlyCustomerHangup);
         claimedSessions.delete(customerSessionId);
         await agentChannel.hangup().catch(() => {});
         await setAgentStatus(agentId, 'available');
-        waitingQueue.unshift({ channel: customerChannel, sessionId: customerSessionId, joinedAt: Date.now() });
+        if (!customerHungUpEarly) {
+            waitingQueue.unshift({ channel: customerChannel, sessionId: customerSessionId, joinedAt: Date.now() });
+        }
+        return;
+    }
+
+    customerChannel.removeListener('StasisEnd', onEarlyCustomerHangup);
+    if (customerHungUpEarly) {
+        console.log(`📵 Customer hung up before agent ${agentId} finished answering ${customerSessionId}`);
+        claimedSessions.delete(customerSessionId);
+        await agentChannel.hangup().catch(() => {});
+        await setAgentStatus(agentId, 'available');
         return;
     }
 
@@ -399,15 +440,19 @@ async function handleOutboundAgentCall(agentChannel, destination) {
     const sessionId = agentChannel.id;
     const calledNumber = normalizePhone(destination);
 
-    await agentChannel.answer();
-    // Gives the agent audible ringback while the destination is actually
-    // ringing (confirmed via live SIP trace: the destination can genuinely
-    // ring for 10+ real seconds before pickup) — without this the agent
-    // hears silence the whole time, indistinguishable from "nothing is
-    // happening". Stopped in completeOutboundBridge once real audio takes
-    // over, or in finishOutboundCall if the call ends before that.
-    await agentChannel.ring().catch(() => {});
+    try {
+        await agentChannel.answer();
+    } catch (err) {
+        console.error(`❌ Failed to answer outbound agent leg ${sessionId}:`, err.message);
+        await agentChannel.hangup().catch(() => {});
+        return;
+    }
 
+    // Registered immediately after answer() succeeds, before any further
+    // awaits — an agent hanging up during the ring() call below would
+    // otherwise fire StasisEnd before anything is listening for it, leaving
+    // this session's pending state (and the real PSTN dial further down)
+    // to run to completion for an agent who already hung up.
     const pending = {
         agentChannel,
         agentId: null,
@@ -424,6 +469,16 @@ async function handleOutboundAgentCall(agentChannel, destination) {
             console.error('❌ Error finishing outbound call:', err.message)
         );
     });
+
+    // Gives the agent audible ringback while the destination is actually
+    // ringing (confirmed via live SIP trace: the destination can genuinely
+    // ring for 10+ real seconds before pickup) — without this the agent
+    // hears silence the whole time, indistinguishable from "nothing is
+    // happening". Stopped in completeOutboundBridge once real audio takes
+    // over, or in finishOutboundCall if the call ends before that.
+    await agentChannel.ring().catch(() => {});
+
+    if (pending.cleaned) return; // agent already hung up — don't dial the real destination for nothing
 
     // The destination should start dialing as fast as possible — measured
     // live, the agent lookup + call log write below took ~665ms combined
@@ -673,6 +728,10 @@ async function main() {
     // nothing would ever move them to a terminal status again.
     const reconciled = await reconcileStaleCallsOnStartup();
     if (reconciled > 0) console.log(`🧹 Reconciled ${reconciled} stale in-progress call(s) from before this restart`);
+
+    const staleAgentsReconciled = await reconcileStaleAgentsOnStartup();
+    if (staleAgentsReconciled > 0)
+        console.log(`🧹 Reconciled ${staleAgentsReconciled} agent(s) stuck on-call from before this restart`);
 
     const ghostsReconciled = await reconcileGhostAgents();
     if (ghostsReconciled > 0) console.log(`👻 Reconciled ${ghostsReconciled} ghost agent(s) back to offline on startup`);

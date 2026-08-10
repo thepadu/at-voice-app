@@ -134,6 +134,26 @@ async function reconcileStaleCallsOnStartup() {
     return data?.length ?? 0;
 }
 
+// This process's in-memory bridge/pending-call state always starts empty, so
+// any agent still marked 'on_call' from before a restart cannot actually be
+// on a call this process knows about or can ever clean up — left alone
+// they'd silently sit out of ring-all rotation forever, with no heartbeat
+// check ever correcting it (reconcileGhostAgents deliberately excludes
+// on_call, since a *real* on-call agent's heartbeat legitimately goes stale
+// while the softphone tab is busy with a call, not because they left).
+async function reconcileStaleAgentsOnStartup() {
+    const { data, error } = await supabase
+        .from('agents')
+        .update({ status: 'available' })
+        .eq('status', 'on_call')
+        .select('id');
+    if (error) {
+        console.error('❌ Failed to reconcile stale on-call agents on startup:', error.message);
+        return 0;
+    }
+    return data?.length ?? 0;
+}
+
 // "Ghost agent" fix: agents.status alone is never trustworthy on its own —
 // a row seeded/provisioned with status='available' that nobody ever
 // actually logged into, or a browser tab that died without a clean logout,
@@ -192,5 +212,6 @@ module.exports = {
     getBusinessHours,
     markMissedIfAbandoned,
     reconcileStaleCallsOnStartup,
+    reconcileStaleAgentsOnStartup,
     reconcileGhostAgents
 };
