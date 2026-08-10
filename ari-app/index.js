@@ -392,14 +392,21 @@ function parseSipUsername(channelName) {
 // transitions to Established right away) while the real destination is
 // dialed out separately; the two are bridged only once the destination
 // genuinely answers, mirroring the same answer-then-bridge sequencing
-// already proven for inbound agent legs. No ring-indication tone here (an
-// earlier version tried channel.ring() on the already-answered agent leg —
-// untested combination on a WebRTC channel, and not worth the risk).
+// already proven for inbound agent legs. A ring() indication gives the
+// agent real ringback audio for however long the destination actually
+// takes to pick up, instead of silence.
 async function handleOutboundAgentCall(agentChannel, destination) {
     const sessionId = agentChannel.id;
     const calledNumber = normalizePhone(destination);
 
     await agentChannel.answer();
+    // Gives the agent audible ringback while the destination is actually
+    // ringing (confirmed via live SIP trace: the destination can genuinely
+    // ring for 10+ real seconds before pickup) — without this the agent
+    // hears silence the whole time, indistinguishable from "nothing is
+    // happening". Stopped in completeOutboundBridge once real audio takes
+    // over, or in finishOutboundCall if the call ends before that.
+    await agentChannel.ring().catch(() => {});
 
     const pending = {
         agentChannel,
@@ -512,16 +519,11 @@ async function completeOutboundBridge(sessionId) {
     // 'failed' when it later ended (finishOutboundCall branches on exactly
     // this flag), and the agent's status would never actually flip to
     // on_call at all since that line was never reached.
-    if (!pending || pending.bridging || pending.bridged || !pending.destChannel) {
-        console.log(
-            `📡 completeOutboundBridge: skipping ${sessionId} — pending=${!!pending} bridging=${pending?.bridging} bridged=${pending?.bridged} hasDest=${!!pending?.destChannel}`
-        );
-        return;
-    }
+    if (!pending || pending.bridging || pending.bridged || !pending.destChannel) return;
     pending.bridging = true;
-    console.log(`📡 completeOutboundBridge: attempting to bridge ${sessionId}`);
 
     try {
+        await pending.agentChannel.ringStop().catch(() => {});
         const bridge = await client.bridges.create({ type: 'mixing' });
         pending.bridge = bridge;
         await bridge.addChannel({ channel: [pending.agentChannel.id, pending.destChannel.id] });
