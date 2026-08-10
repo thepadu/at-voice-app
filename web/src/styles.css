@@ -453,6 +453,14 @@ tr:not(:last-child) td {
     color: white;
 }
 
+/* A soft, confirmed look distinct from both the primary teal (the button
+   before anyone's acted on it) and plain gray (which would read as
+   disabled) — still clickable, for calling back again if needed. */
+.btn-callback-done {
+    background: var(--tint);
+    color: var(--brand);
+}
+
 .btn-link {
     background: none;
     padding: 4px 8px;

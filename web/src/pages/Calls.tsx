@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
-import { useToast } from '../lib/toast';
+import { useSoftphone } from '../lib/softphone';
 import StatusPill from '../components/StatusPill';
 import Pagination from '../components/Pagination';
 
@@ -12,6 +12,7 @@ type Call = {
     duration: number | null;
     created_at: string;
     agent_name?: string | null;
+    called_back?: boolean;
 };
 
 type Tab = 'incoming' | 'outgoing' | 'missed';
@@ -38,7 +39,7 @@ function missedReason(status: string | null) {
 export default function Calls() {
     const [tab, setTab] = useState<Tab>('incoming');
     const [page, setPage] = useState(1);
-    const showToast = useToast();
+    const { placeCall } = useSoftphone();
 
     const [draftFrom, setDraftFrom] = useState('');
     const [draftTo, setDraftTo] = useState('');
@@ -79,13 +80,13 @@ export default function Calls() {
     const total: number = data?.total ?? 0;
     const totalPages: number = data?.totalPages ?? 1;
 
-    async function callBack(caller: string) {
-        try {
-            await apiFetch('/call', { method: 'POST', body: JSON.stringify({ phone: caller }) });
-            showToast(`📞 Calling ${caller} back`);
-        } catch (err) {
-            showToast(err instanceof Error ? err.message : 'Call failed', 'error');
-        }
+    // Routed through the same browser softphone as the dialer (placeCall
+    // already handles its own "not registered" / "already on a call" /
+    // failure feedback via toasts, and the outgoing-call banner covers the
+    // "calling…" state) — this used to hit the old Africa's Talking /call
+    // endpoint, a leftover from before outbound calling moved to Asterisk.
+    function callBack(caller: string) {
+        placeCall(`+${caller}`);
     }
 
     return (
@@ -208,8 +209,12 @@ export default function Calls() {
                                     <td>{missedReason(call.status)}</td>
                                     <td>{new Date(call.created_at).toLocaleString()}</td>
                                     <td>
-                                        <button className="btn btn-primary" onClick={() => callBack(call.caller)}>
-                                            Call back
+                                        <button
+                                            className={call.called_back ? 'btn btn-callback-done' : 'btn btn-primary'}
+                                            onClick={() => callBack(call.caller)}
+                                            title={call.called_back ? 'Already called back — click to call again' : undefined}
+                                        >
+                                            {call.called_back ? '✓ Called back' : 'Call back'}
                                         </button>
                                     </td>
                                 </tr>

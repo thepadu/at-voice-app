@@ -148,7 +148,27 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
 
         if (tab === 'incoming') calls = calls.filter(row => classifyDirection(row) === 'incoming');
         if (tab === 'outgoing') calls = calls.filter(row => classifyDirection(row) === 'outgoing');
-        if (tab === 'missed') calls = calls.filter(isMissed);
+
+        if (tab === 'missed') {
+            calls = calls.filter(isMissed);
+
+            // Tells the agent at a glance whether this caller has already
+            // been called back — derived from the data itself (any later
+            // Outbound row to the same number) rather than a separate
+            // tracked flag, so it can never drift out of sync with what
+            // actually happened.
+            const outboundTimesByCaller = new Map();
+            data.forEach(row => {
+                if (classifyDirection(row) !== 'outgoing' || !row.caller) return;
+                const times = outboundTimesByCaller.get(row.caller) ?? [];
+                times.push(row.created_at);
+                outboundTimesByCaller.set(row.caller, times);
+            });
+            calls = calls.map(row => ({
+                ...row,
+                called_back: (outboundTimesByCaller.get(row.caller) ?? []).some(t => new Date(t) > new Date(row.created_at))
+            }));
+        }
 
         const summary = {
             total: calls.length,
