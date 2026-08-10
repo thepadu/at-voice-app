@@ -44,6 +44,29 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         return row.status === 'failed' || row.status === 'forwarded' || row.status === 'after_hours';
     }
 
+    // Stamps last_seen_at alongside the status change — any explicit change
+    // (the agent themselves, or a supervisor confirming it by hand) is a
+    // live signal, so it resets the staleness clock reconcileGhostAgents
+    // (ari-app) uses, preventing a freshly-set "available" from being swept
+    // back to offline before the next heartbeat lands. Falls back to a
+    // plain status update if last_seen_at doesn't exist yet (migration
+    // 010_agent_last_seen.sql not yet applied) — status changes must keep
+    // working regardless of migration timing.
+    async function updateAgentStatus(agentId, fields) {
+        const result = await supabase
+            .from('agents')
+            .update({ ...fields, last_seen_at: new Date().toISOString() })
+            .eq('id', agentId)
+            .select()
+            .single();
+
+        if (result.error?.message?.includes('last_seen_at')) {
+            return supabase.from('agents').update(fields).eq('id', agentId).select().single();
+        }
+
+        return result;
+    }
+
     // Going "available" means different things depending on how this agent
     // actually takes calls:
     //  - Agents with a real WebRTC softphone (a row in agent_sip_credentials,
@@ -56,13 +79,8 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     //    phone-standby hold-queue loop (see app.js's /agent-standby), so
     //    nothing already depending on that path breaks.
     async function setAgentStatus(agent, status) {
-        // Any explicit status change is a live signal that someone (the
-        // agent themselves, or a supervisor confirming it by hand) has just
-        // touched this — reset the staleness clock so a fresh "available"
-        // isn't immediately swept back to offline by reconcileGhostAgents
-        // before the next heartbeat lands.
         if (status !== 'available') {
-            return supabase.from('agents').update({ status, last_seen_at: new Date().toISOString() }).eq('id', agent.id).select().single();
+            return updateAgentStatus(agent.id, { status });
         }
 
         const { data: sipCreds } = await supabase
@@ -72,12 +90,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             .maybeSingle();
 
         if (sipCreds) {
-            return supabase
-                .from('agents')
-                .update({ status: 'available', last_seen_at: new Date().toISOString() })
-                .eq('id', agent.id)
-                .select()
-                .single();
+            return updateAgentStatus(agent.id, { status: 'available' });
         }
 
         await supabase.from('agents').update({ status: 'ringing' }).eq('id', agent.id);
