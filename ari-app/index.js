@@ -1,4 +1,20 @@
 require('dotenv').config();
+
+// A crash here drops every active call on the system, not just one — worth
+// containing whatever can be contained. An unhandled rejection (Node 15+
+// terminates by default) is logged and the process keeps running, since
+// it's almost always scoped to one call's async chain rather than
+// corrupting shared state. A genuinely uncaught synchronous exception exits
+// deliberately (systemd's Restart=always brings it back up) rather than
+// risk continuing to route calls with state integrity no longer guaranteed.
+process.on('unhandledRejection', reason => {
+    console.error('❌ Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', err => {
+    console.error('❌ Uncaught exception, exiting:', err);
+    process.exit(1);
+});
+
 const ari = require('ari-client');
 const { normalizePhone } = require('./lib/phone');
 const { synthesize } = require('./tts');
@@ -302,39 +318,59 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         return;
     }
 
-    const bridge = await client.bridges.create({ type: 'mixing' });
-    await holdingBridge.removeChannel({ channel: customerChannel.id }).catch(() => {});
-    await bridge.addChannel({ channel: [customerChannel.id, agentChannel.id] });
-
-    const startedAt = Date.now();
-    await setAgentStatus(agentId, 'on_call');
-    // Match the same field the rest of the app already keys on — the React
-    // app's GET /api/agents/me/active-call looks this row up by agent.phone,
-    // not agent id.
-    const agentPhone = await getAgentPhone(agentId);
-    await upsertCallLog({ session_id: customerSessionId, status: 'ongoing', agent_number: agentPhone });
-
-    console.log(`🔗 Bridged ${customerSessionId} with agent ${agentId}`);
-
+    // Registered right after answer() succeeds — before the bridge-setup
+    // sequence below, which has several awaits (bridge create, remove from
+    // holding, add channels, DB writes). Attaching these listeners only
+    // after all of that finished meant a hangup during that window fired
+    // StasisEnd before anything was listening for it: standard EventEmitter
+    // semantics, an event that fires before you subscribe is simply missed.
+    // The agent would be left claimed, on_call, and bridged to a channel
+    // that no longer existed, with nothing to ever clean it up.
     let cleaned = false;
-    const cleanup = async () => {
+    const state = { bridge: null, startedAt: null };
+    const cleanup = async (finalStatus = 'completed') => {
         if (cleaned) return;
         cleaned = true;
         claimedSessions.delete(customerSessionId);
-        await bridge.destroy().catch(() => {});
+        if (state.bridge) await state.bridge.destroy().catch(() => {});
         await customerChannel.hangup().catch(() => {});
         await agentChannel.hangup().catch(() => {});
         await setAgentStatus(agentId, 'available');
         await upsertCallLog({
             session_id: customerSessionId,
-            status: 'completed',
-            duration: Math.round((Date.now() - startedAt) / 1000)
+            status: finalStatus,
+            duration: state.startedAt ? Math.round((Date.now() - state.startedAt) / 1000) : 0
         });
-        console.log(`📴 Call ended: ${customerSessionId} <-> agent ${agentId}`);
+        console.log(`📴 Call ended: ${customerSessionId} <-> agent ${agentId} (${finalStatus})`);
     };
 
-    customerChannel.once('StasisEnd', cleanup);
-    agentChannel.once('StasisEnd', cleanup);
+    customerChannel.once('StasisEnd', () => cleanup());
+    agentChannel.once('StasisEnd', () => cleanup());
+
+    try {
+        const bridge = await client.bridges.create({ type: 'mixing' });
+        state.bridge = bridge;
+        await holdingBridge.removeChannel({ channel: customerChannel.id }).catch(() => {});
+        await bridge.addChannel({ channel: [customerChannel.id, agentChannel.id] });
+
+        state.startedAt = Date.now();
+        await setAgentStatus(agentId, 'on_call');
+        // Match the same field the rest of the app already keys on — the
+        // React app's GET /api/agents/me/active-call looks this row up by
+        // agent.phone, not agent id.
+        const agentPhone = await getAgentPhone(agentId);
+        await upsertCallLog({ session_id: customerSessionId, status: 'ongoing', agent_number: agentPhone });
+
+        console.log(`🔗 Bridged ${customerSessionId} with agent ${agentId}`);
+    } catch (err) {
+        // Previously unhandled — this rejection propagated all the way to
+        // the generic StasisStart catch, leaving the claim held forever,
+        // the agent stuck (never reverted to available), and no StasisEnd
+        // listener state to fall back on either. Now it's exactly one of
+        // several ways cleanup() can be reached, all idempotent.
+        console.error(`❌ Error bridging agent ${agentId} to ${customerSessionId}:`, err.message);
+        await cleanup('failed');
+    }
 }
 
 // ARI channel names look like "PJSIP/simon-00000123" — the part between the
@@ -372,7 +408,15 @@ async function handleOutboundAgentCall(agentChannel, destination) {
 
     await agentChannel.answer();
 
-    const pending = { agentChannel, destChannel: null, bridge: null, bridged: false, cleaned: false, answeredAt: null };
+    const pending = {
+        agentChannel,
+        agentId: agentInfo?.id ?? null,
+        destChannel: null,
+        bridge: null,
+        bridged: false,
+        cleaned: false,
+        answeredAt: null
+    };
     outboundBySessionId.set(sessionId, pending);
 
     agentChannel.once('StasisEnd', () => {
@@ -430,16 +474,37 @@ async function bridgeOutboundDest(destChannel, sessionId) {
 
 async function completeOutboundBridge(sessionId) {
     const pending = outboundBySessionId.get(sessionId);
-    if (!pending || pending.bridged || !pending.destChannel) return;
-    pending.bridged = true;
-    pending.answeredAt = Date.now();
+    // `bridging` guards against re-entry while this is still in flight
+    // (async, so a second ChannelStateChange event could otherwise start a
+    // second concurrent attempt); `bridged` is only set true once the
+    // bridge has actually, successfully formed — previously it was set
+    // eagerly up front, so a failure in bridges.create()/addChannel() below
+    // would still leave the call logged as 'completed' rather than
+    // 'failed' when it later ended (finishOutboundCall branches on exactly
+    // this flag), and the agent's status would never actually flip to
+    // on_call at all since that line was never reached.
+    if (!pending || pending.bridging || pending.bridged || !pending.destChannel) return;
+    pending.bridging = true;
 
-    const bridge = await client.bridges.create({ type: 'mixing' });
-    pending.bridge = bridge;
-    await bridge.addChannel({ channel: [pending.agentChannel.id, pending.destChannel.id] });
-    await upsertCallLog({ session_id: sessionId, status: 'ongoing' });
+    try {
+        const bridge = await client.bridges.create({ type: 'mixing' });
+        pending.bridge = bridge;
+        await bridge.addChannel({ channel: [pending.agentChannel.id, pending.destChannel.id] });
+        await upsertCallLog({ session_id: sessionId, status: 'ongoing' });
 
-    console.log(`🔗 Outbound call bridged: ${sessionId}`);
+        pending.bridged = true;
+        pending.answeredAt = Date.now();
+
+        // Without this, the roster and ring-all both kept seeing the agent
+        // as 'available' for the entire duration of an outbound call — a
+        // new customer could be routed straight to someone already busy.
+        if (pending.agentId) await setAgentStatus(pending.agentId, 'on_call');
+
+        console.log(`🔗 Outbound call bridged: ${sessionId}`);
+    } catch (err) {
+        console.error(`❌ Failed to complete outbound bridge for ${sessionId}:`, err.message);
+        await finishOutboundCall(sessionId, 'failed');
+    }
 }
 
 async function finishOutboundCall(sessionId, status) {
@@ -451,6 +516,13 @@ async function finishOutboundCall(sessionId, status) {
     if (pending.bridge) await pending.bridge.destroy().catch(() => {});
     await pending.agentChannel.hangup().catch(() => {});
     await pending.destChannel?.hangup().catch(() => {});
+
+    // Only revert if this call actually flipped them to on_call in the
+    // first place (completeOutboundBridge) — a call that never bridged
+    // never touched agent status, and forcing 'available' here could
+    // stomp on an unrelated concurrent state change (e.g. mid-ring for a
+    // different, incoming call).
+    if (pending.agentId && pending.bridged) await setAgentStatus(pending.agentId, 'available');
 
     const duration = pending.answeredAt ? Math.round((Date.now() - pending.answeredAt) / 1000) : 0;
     await upsertCallLog({ session_id: sessionId, status, duration });

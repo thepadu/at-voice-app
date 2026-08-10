@@ -11,6 +11,30 @@ const authRoutes = require('./auth');
 const apiRoutes = require('./api');
 const outboundRoutes = require('./outbound');
 
+// Express 4 does not route a rejected promise from an async route handler
+// to any error middleware — it just becomes an "unhandled rejection" at the
+// Node process level, which (Node 15+) terminates the process by default.
+// Almost none of the routes below wrap their async body in try/catch (they
+// mostly rely on Supabase returning `{error}` rather than throwing), so
+// without this, a single unexpected error from any request — a library
+// behaving differently than expected, a malformed payload reaching code
+// that doesn't guard for it — would crash the server for every connected
+// user, not just the one request. Logging and continuing turns that into a
+// contained per-request failure instead. Registered before anything else
+// so it's active for the entire process lifetime, including module init.
+process.on('unhandledRejection', reason => {
+    console.error('❌ Unhandled promise rejection:', reason);
+});
+
+// A genuinely uncaught synchronous exception means some code ran in a state
+// nothing anticipated — safer to log it and let the process exit (Render
+// restarts the container automatically) than to keep serving requests from
+// a process whose state integrity is no longer guaranteed.
+process.on('uncaughtException', err => {
+    console.error('❌ Uncaught exception, exiting:', err);
+    process.exit(1);
+});
+
 const app = express();
 
 app.use(bodyParser.urlencoded({ extended: false }));

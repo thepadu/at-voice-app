@@ -3,11 +3,18 @@ const { toE164, isValidE164, normalizePhone } = require('./lib/phone');
 
 module.exports = function (app, supabase, requireAuth) {
 
-    // 📞 CALL ROUTE (GET + POST supported)
-    app.all('/call', requireAuth, async (req, res) => {
+    // 📞 CALL ROUTE
+    // POST only, phone read from the body — this places a real, billed
+    // call, so it must not be reachable via a plain GET. The session
+    // cookie is SameSite=Lax, which IS sent on a top-level GET navigation
+    // (only cross-site subresource/POST requests are blocked by Lax) — a
+    // GET-with-query-param version of this route would let any page a
+    // logged-in agent visits trigger an arbitrary outbound call just by
+    // linking to it.
+    app.post('/call', requireAuth, async (req, res) => {
         console.log("🔥 /call route hit");
 
-        let phone = req.body.phone || req.query.phone;
+        let phone = req.body.phone;
 
         if (!phone) {
             return res.status(400).send('Missing phone number');

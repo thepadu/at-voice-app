@@ -25,6 +25,17 @@ function run(command, args, input) {
     return new Promise((resolve, reject) => {
         const child = execFile(command, args, err => (err ? reject(err) : resolve()));
         if (input !== undefined) {
+            // If the child fails to start or dies before/during the write
+            // (bad binary path, OOM, a crash on certain input text), the
+            // stdin stream emits its own 'error' (EPIPE) — a stream event,
+            // not something the execFile callback's `err` catches. Left
+            // unhandled, that throws and crashes the entire ARI process,
+            // dropping every active call on the system, not just this one
+            // synthesis request. Rejecting the promise here (safe to call
+            // even if the execFile callback also settles it — a promise
+            // only honors its first settlement) turns that into a normal,
+            // per-call synthesize() failure instead.
+            child.stdin.on('error', reject);
             child.stdin.write(input);
             child.stdin.end();
         }

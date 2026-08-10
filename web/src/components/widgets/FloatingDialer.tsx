@@ -11,7 +11,7 @@ export default function FloatingDialer() {
     const [error, setError] = useState('');
     const [calling, setCalling] = useState(false);
     const showToast = useToast();
-    const { registrationState, placeCall } = useSoftphone();
+    const { registrationState, activeCall, outgoingCall, incomingCall, placeCall } = useSoftphone();
 
     async function makeCall() {
         const phone = formatPhone(input);
@@ -23,6 +23,15 @@ export default function FloatingDialer() {
 
         if (registrationState !== 'registered') {
             setError('Softphone is not registered yet — check your connection');
+            return;
+        }
+
+        // Placing a second call while one is already active/ringing would
+        // silently overwrite the tracked activeCall/outgoingCall state —
+        // the first call would keep running server-side with no UI left to
+        // control it.
+        if (activeCall || outgoingCall || incomingCall) {
+            setError('Finish or end the current call first');
             return;
         }
 

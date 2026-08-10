@@ -235,11 +235,43 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         });
     });
 
+    // ── Dashboard: calls by hour ─────────────────────────────────────────
+    // Must be registered before /api/calls/:sessionId below — Express
+    // matches routes in registration order, and "by-hour" is itself a valid
+    // (if useless) session id as far as that dynamic route is concerned. It
+    // silently swallowed every request here for a while before this was
+    // caught: always returned {call: null}, so the calls-by-hour chart
+    // (Dashboard and Analytics) was permanently empty.
+    app.get('/api/calls/by-hour', requireAuth, async (req, res) => {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const { data, error } = await supabase
+            .from('call_logs')
+            .select('created_at')
+            .gte('created_at', startOfDay.toISOString());
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load call volume' });
+        }
+
+        const hourCounts = new Array(24).fill(0);
+        data.forEach(row => {
+            const hour = new Date(row.created_at).getHours();
+            hourCounts[hour]++;
+        });
+
+        res.json({
+            hours: hourCounts.map((count, hour) => ({ hour, count }))
+        });
+    });
+
     // GET /api/calls/:sessionId — a single call's current state, by session
     // id. Used by the floating dialer to poll for "is the call I just placed
     // still dialing / connected / over" without any push infra. Registered
-    // after /api/calls/live and /api/queue above so those literal paths
-    // aren't shadowed by this dynamic segment.
+    // after /api/calls/live, /api/queue, and /api/calls/by-hour above so
+    // those literal paths aren't shadowed by this dynamic segment.
     app.get('/api/calls/:sessionId', requireAuth, async (req, res) => {
         const { data, error } = await supabase
             .from('call_logs')
@@ -983,30 +1015,4 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         res.json({ hours: data });
     });
 
-    // ── Dashboard: calls by hour ─────────────────────────────────────────
-
-    app.get('/api/calls/by-hour', requireAuth, async (req, res) => {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-
-        const { data, error } = await supabase
-            .from('call_logs')
-            .select('created_at')
-            .gte('created_at', startOfDay.toISOString());
-
-        if (error) {
-            console.error(error);
-            return res.status(500).json({ error: 'Failed to load call volume' });
-        }
-
-        const hourCounts = new Array(24).fill(0);
-        data.forEach(row => {
-            const hour = new Date(row.created_at).getHours();
-            hourCounts[hour]++;
-        });
-
-        res.json({
-            hours: hourCounts.map((count, hour) => ({ hour, count }))
-        });
-    });
 };

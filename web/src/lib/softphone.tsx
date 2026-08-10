@@ -322,6 +322,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 showToast('Softphone is not registered yet', 'error');
                 return;
             }
+            // A second concurrent call would silently overwrite
+            // activeCall/outgoingCall's single-call state — the first call
+            // would keep running server-side with no UI left to control it.
+            if (activeCall || outgoingCall || incomingCall) {
+                showToast('Finish or end the current call first', 'error');
+                return;
+            }
             const target = UserAgent.makeURI(`sip:${destinationE164}@${domainRef.current}`);
             if (!target) return;
 
@@ -341,7 +348,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 setOutgoingCall(current => (current?.session === inviter ? null : current));
             }
         },
-        [registrationState, showToast, wireSessionStateChange]
+        [registrationState, activeCall, outgoingCall, incomingCall, showToast, wireSessionStateChange]
     );
 
     return (
