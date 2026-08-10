@@ -1,23 +1,35 @@
+/* ── Moneto brand palette ──────────────────────────────────────────── */
+
 :root {
-    --ink: #0f172a;
-    --secondary: #475569;
-    --muted: #94a3b8;
-    --border: #e2e8f0;
-    --page-bg: #f8fafc;
+    --ink: #2C3E50;
+    --secondary: #757575;
+    --muted: #9E9E9E;
+    --border: #E0E0E0;
+    --page-bg: #F9F9F9;
     --surface: #ffffff;
-    --sidebar-bg: #0f172a;
+    --sidebar-bg: #2C3E50;
     --topbar-bg: #ffffff;
-    --brand: #15803d;
-    --brand-dark: #14532d;
-    --brand-bright: #4ade80;
+    --brand: #17A697;
+    --brand-dark: #2C3E50;
+    --brand-bright: #4DB8AA;
+    --brand-rgb: 23, 166, 151;
+    --danger: #EF5350;
+    --danger-dark: #C2185B;
+    --warning: #F39C12;
+    --tint: #E0F5F2;
 }
 
 :root.dark {
-    --page-bg: #0b1220;
-    --topbar-bg: #111827;
-    --border: #1f2937;
-    --ink: #f1f5f9;
-    --secondary: #cbd5e1;
+    --page-bg: #1A242E;
+    --topbar-bg: #22303D;
+    --border: #3A4A59;
+    --ink: #F5F5F5;
+    --secondary: #BDBDBD;
+    /* Pre-existing gap: --surface (cards/panels/tables/tabs/modals) was
+       never overridden for dark mode, so it stayed white while --ink/
+       --secondary switched to light-on-dark colors — text was unreadably
+       faint against those still-white surfaces. */
+    --surface: #22303D;
 }
 
 * {
@@ -70,7 +82,7 @@ h1, h2, h3, h4 {
     width: 236px;
     flex-shrink: 0;
     background: var(--sidebar-bg);
-    color: #e2e8f0;
+    color: #F5F5F5;
     display: flex;
     flex-direction: column;
     padding: 22px 14px;
@@ -117,13 +129,13 @@ h1, h2, h3, h4 {
     border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
-    color: #94a3b8;
+    color: #9E9E9E;
     text-decoration: none;
 }
 
 .sidebar-link:hover {
-    background: #1e293b;
-    color: #e2e8f0;
+    background: #3A4A59;
+    color: #F5F5F5;
 }
 
 .sidebar-link.active {
@@ -134,7 +146,7 @@ h1, h2, h3, h4 {
 .sidebar-footer {
     margin-top: auto;
     padding-top: 16px;
-    border-top: 1px solid #1e293b;
+    border-top: 1px solid #3A4A59;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -170,11 +182,11 @@ h1, h2, h3, h4 {
 
 .sidebar-user-role {
     font-size: 11px;
-    color: #64748b;
+    color: #9E9E9E;
 }
 
 .sidebar-logout {
-    color: #94a3b8;
+    color: #9E9E9E;
     text-decoration: none;
     font-size: 16px;
     padding: 4px;
@@ -230,8 +242,8 @@ h1, h2, h3, h4 {
     display: flex;
     align-items: center;
     gap: 6px;
-    background: #dcfce7;
-    color: #15803d;
+    background: var(--tint);
+    color: var(--brand);
     padding: 6px 12px;
     border-radius: 20px;
     font-size: 12px;
@@ -243,7 +255,7 @@ h1, h2, h3, h4 {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #15803d;
+    background: var(--brand);
 }
 
 .topbar-theme-toggle {
@@ -344,7 +356,7 @@ tr:not(:last-child) td {
 
 @keyframes pulse-row {
     0%, 100% { background: transparent; }
-    50% { background: #eff6ff; }
+    50% { background: var(--tint); }
 }
 
 .empty {
@@ -432,12 +444,12 @@ tr:not(:last-child) td {
 }
 
 .btn-secondary {
-    background: #e5e7eb;
-    color: #1f2937;
+    background: #F5F5F5;
+    color: var(--ink);
 }
 
 .btn-danger {
-    background: #ef4444;
+    background: var(--danger);
     color: white;
 }
 
@@ -449,7 +461,7 @@ tr:not(:last-child) td {
 }
 
 .btn-link-danger {
-    color: #ef4444;
+    color: var(--danger);
 }
 
 .row-actions {
@@ -496,7 +508,7 @@ tr:not(:last-child) td {
 }
 
 .danger-text {
-    color: #b91c1c;
+    color: var(--danger-dark);
 }
 
 /* ── Forms ─────────────────────────────────────────────────────────── */
@@ -526,7 +538,7 @@ input, select, textarea {
 input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: var(--brand);
-    box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.15);
+    box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.15);
 }
 
 textarea {
@@ -534,7 +546,7 @@ textarea {
 }
 
 .error {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 13px;
 }
 
@@ -543,7 +555,7 @@ textarea {
 .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(15, 23, 42, 0.5);
+    background: rgba(44, 62, 80, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -600,7 +612,7 @@ textarea {
 }
 
 .toast-error {
-    background: #ef4444;
+    background: var(--danger);
 }
 
 @keyframes toast-in {
@@ -658,7 +670,7 @@ textarea {
 
 .ivr-preview-greeting {
     border: 1px solid var(--brand-bright);
-    background: #f0fdf4;
+    background: var(--tint);
     border-radius: 8px;
     padding: 10px 12px;
     font-size: 12px;
@@ -723,7 +735,7 @@ textarea {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: #dcfce7;
+    background: var(--tint);
     color: var(--brand);
     display: flex;
     align-items: center;
@@ -765,7 +777,7 @@ textarea {
     cursor: pointer;
     border: none;
     font-size: 20px;
-    box-shadow: 0 6px 18px rgba(21, 128, 61, 0.35);
+    box-shadow: 0 6px 18px rgba(var(--brand-rgb), 0.35);
 }
 
 .floating-dialer {
@@ -900,7 +912,7 @@ textarea {
 
 .sidebar-badge {
     margin-left: auto;
-    background: #dc2626;
+    background: var(--danger);
     color: #fff;
     font-size: 11px;
     font-weight: 700;
@@ -911,11 +923,11 @@ textarea {
 /* ── Live Queue SLA row coloring ───────────────────────────────────── */
 
 .queue-row-warning {
-    border-left: 3px solid #f59e0b;
+    border-left: 3px solid var(--warning);
 }
 
 .queue-row-danger {
-    border-left: 3px solid #b91c1c;
+    border-left: 3px solid var(--danger-dark);
 }
 
 /* ── Tickets page ──────────────────────────────────────────────────── */
@@ -966,7 +978,7 @@ textarea {
     width: 46px;
     height: 26px;
     border-radius: 14px;
-    background: #cbd5e1;
+    background: #BDBDBD;
     position: relative;
     cursor: pointer;
     transition: background 0.15s ease;
@@ -1076,7 +1088,7 @@ textarea {
 }
 
 .status-bar-end-btn {
-    background: #ef4444;
+    background: var(--danger);
     color: #fff;
     padding: 6px 14px;
     font-size: 12px;
@@ -1086,9 +1098,10 @@ textarea {
 /* Fixed to the viewport (not a flex child of .app-shell, which is why an
    earlier version rendered as a squeezed sliver between the sidebar and
    content instead of a real banner) — stays visible regardless of scroll
-   position or which page the agent is on. Deliberately NOT brand-dark green
-   (that's .status-bar's "already on a call" color) — amber/orange reads as
-   "needs attention now" and won't be mistaken for the routine in-call bar. */
+   position or which page the agent is on. Deliberately NOT brand-dark navy
+   (that's .status-bar's "already on a call" color) — Moneto's warning/gold
+   oranges read as "needs attention now" and won't be mistaken for the
+   routine in-call bar. */
 
 .incoming-call-banner {
     position: fixed;
@@ -1096,7 +1109,7 @@ textarea {
     left: 0;
     right: 0;
     z-index: 500;
-    background: linear-gradient(135deg, #f59e0b, #ea580c);
+    background: linear-gradient(135deg, #FF9800, #F39C12);
     color: #fff;
     display: flex;
     align-items: center;
@@ -1114,8 +1127,8 @@ textarea {
 }
 
 @keyframes incoming-call-glow {
-    0%, 100% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 0 rgba(245, 158, 11, 0.6); }
-    50% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 8px rgba(245, 158, 11, 0); }
+    0%, 100% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 0 rgba(255, 152, 0, 0.6); }
+    50% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 8px rgba(255, 152, 0, 0); }
 }
 
 /* Extra-insistent variant for when the ringtone couldn't autoplay (no user
@@ -1150,7 +1163,7 @@ textarea {
 
 .incoming-call-answer {
     background: #fff;
-    color: #ea580c;
+    color: #F39C12;
     padding: 8px 22px;
     font-weight: 700;
 }
@@ -1163,9 +1176,10 @@ textarea {
 }
 
 /* ── Outgoing call banner ─────────────────────────────────────────── */
-/* Same fixed-to-viewport treatment as the incoming banner, but a calm blue
-   identity — the agent chose to place this call, so it shouldn't compete for
-   attention the way an unprompted incoming ring does. */
+/* Same fixed-to-viewport treatment as the incoming banner, but the app's own
+   teal brand identity rather than an urgent color — the agent chose to place
+   this call, so it shouldn't compete for attention the way an unprompted
+   incoming ring does. */
 
 .outgoing-call-banner {
     position: fixed;
@@ -1173,7 +1187,7 @@ textarea {
     left: 0;
     right: 0;
     z-index: 500;
-    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    background: linear-gradient(135deg, #17A697, #2C3E50);
     color: #fff;
     display: flex;
     align-items: center;

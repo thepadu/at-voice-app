@@ -132,7 +132,7 @@ export default function Tickets() {
                                     <td>{t.tag ?? '—'}</td>
                                     <td>{t.priority}</td>
                                     <td>
-                                        <span className="status-pill" style={{ background: '#F59E0B' }}>{t.status}</span>
+                                        <span className="status-pill" style={{ background: '#F39C12' }}>{t.status}</span>
                                     </td>
                                     <td>{t.assigned_agent_name ?? '—'}</td>
                                 </tr>

@@ -168,7 +168,7 @@ export default function Agents() {
                                     <StatusPill value={agent.status} />
                                 </button>
                                 {agent.role === 'supervisor' && (
-                                    <span className="status-pill" style={{ background: '#334155', marginLeft: 6 }}>
+                                    <span className="status-pill" style={{ background: '#2C3E50', marginLeft: 6 }}>
                                         Supervisor
                                     </span>
                                 )}

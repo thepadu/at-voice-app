@@ -136,12 +136,40 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
+            let everConnected = false;
+
             const userAgent = new UserAgent({
                 uri,
-                transportOptions: { server: creds.wssUrl },
+                // keepAliveInterval pings the WebSocket every 30s so idle
+                // periods (an agent's tab sitting untouched for hours)
+                // don't get silently dropped by a proxy/NAT timing out an
+                // apparently-inactive connection — this was the root cause
+                // of "softphone not registered" after a while idle, with no
+                // error and no automatic recovery. reconnectionAttempts is
+                // 0 by default (no retry at all) — Infinity plus onConnect
+                // re-registering below is what actually recovers a dropped
+                // connection instead of leaving the agent silently
+                // unreachable until they refresh the page.
+                transportOptions: { server: creds.wssUrl, keepAliveInterval: 30 },
+                reconnectionAttempts: Infinity,
+                reconnectionDelay: 4,
                 authorizationUsername: creds.username,
                 authorizationPassword: creds.password,
                 delegate: {
+                    onConnect: () => {
+                        if (!everConnected) {
+                            everConnected = true;
+                            return;
+                        }
+                        console.log('[softphone] transport reconnected, re-registering');
+                        showToast('Softphone reconnected', 'success');
+                        registererRef.current?.register().catch(() => {});
+                    },
+                    onDisconnect: err => {
+                        console.warn('[softphone] transport disconnected:', err?.message);
+                        setRegistrationState('unregistered');
+                        showToast('Softphone connection lost — reconnecting…', 'error');
+                    },
                     onInvite: (invitation: Invitation) => {
                         const callerNumber = invitation.remoteIdentity.uri.user ?? 'Unknown';
                         setIncomingCall({ session: invitation, callerNumber });

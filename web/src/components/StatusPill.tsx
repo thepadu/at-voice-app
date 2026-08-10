@@ -1,23 +1,26 @@
+// Moneto brand palette: teal for "good/active" states, a lighter tealGreen
+// for "in progress right now", gold-orange for "needs attention soon", and
+// coral for anything that didn't go as planned.
 const COLORS: Record<string, string> = {
-    available: '#10B981',
-    on_call: '#1d4ed8',
-    ringing: '#F59E0B',
-    break: '#F59E0B',
-    offline: '#6B7280',
-    completed: '#10B981',
-    ongoing: '#3B82F6',
-    queued: '#3B82F6',
-    dialing: '#3B82F6',
-    failed: '#EF4444',
-    forwarded: '#F59E0B',
-    after_hours: '#6B7280',
-    open: '#EF4444',
-    in_progress: '#F59E0B',
-    resolved: '#10B981'
+    available: '#17A697',
+    on_call: '#4DB8AA',
+    ringing: '#F39C12',
+    break: '#F39C12',
+    offline: '#757575',
+    completed: '#17A697',
+    ongoing: '#4DB8AA',
+    queued: '#4DB8AA',
+    dialing: '#4DB8AA',
+    failed: '#EF5350',
+    forwarded: '#F39C12',
+    after_hours: '#757575',
+    open: '#EF5350',
+    in_progress: '#F39C12',
+    resolved: '#17A697'
 };
 
 export default function StatusPill({ value, label }: { value: string; label?: string }) {
-    const color = COLORS[value] || '#6B7280';
+    const color = COLORS[value] || '#757575';
     return (
         <span className="status-pill" style={{ background: color }}>
             {label ?? value.replace('_', ' ')}
