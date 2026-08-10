@@ -82,8 +82,12 @@ async function playText(channel, text) {
     const playback = client.Playback();
     // Not awaited — channel.play() resolves once the command is accepted,
     // not once playback finishes; PlaybackFinished is what actually signals
-    // completion.
-    channel.play({ media: `sound:${soundName}` }, playback);
+    // completion. Still needs a .catch(): if the caller hangs up right as
+    // this command reaches Asterisk, the channel is already gone by the
+    // time it's processed and this rejects with "Channel not found" — with
+    // no await and nothing else referencing this promise, that was an
+    // unhandled rejection every time a caller hung up mid-greeting/menu.
+    channel.play({ media: `sound:${soundName}` }, playback).catch(() => {});
     return new Promise(resolve => playback.once('PlaybackFinished', resolve));
 }
 
@@ -394,23 +398,12 @@ function parseSipUsername(channelName) {
 async function handleOutboundAgentCall(agentChannel, destination) {
     const sessionId = agentChannel.id;
     const calledNumber = normalizePhone(destination);
-    const agentInfo = await getAgentBySipUsername(parseSipUsername(agentChannel.name));
-
-    console.log(`📤 Outbound call ${sessionId}: agent ${agentInfo?.name || 'unknown'} -> ${calledNumber}`);
-
-    await upsertCallLog({
-        session_id: sessionId,
-        caller: calledNumber,
-        direction: 'Outbound',
-        status: 'dialing',
-        agent_number: agentInfo?.phone || null
-    });
 
     await agentChannel.answer();
 
     const pending = {
         agentChannel,
-        agentId: agentInfo?.id ?? null,
+        agentId: null,
         destChannel: null,
         bridge: null,
         bridged: false,
@@ -425,22 +418,61 @@ async function handleOutboundAgentCall(agentChannel, destination) {
         );
     });
 
-    try {
-        await client.channels.originate({
+    // The destination should start dialing as fast as possible — measured
+    // live, the agent lookup + call log write below took ~665ms combined
+    // (two sequential Supabase round trips), all of it previously spent
+    // *before* originate() was even called. Neither is needed to place the
+    // call itself, only to log/attribute it, so they now run concurrently
+    // with origination instead of blocking it. Safe ordering-wise: the
+    // initial 'dialing' row lands well before any real PSTN answer could
+    // possibly arrive (that alone takes several seconds), so there's no
+    // realistic risk of it overwriting completeOutboundBridge's later
+    // 'ongoing' write.
+    const logPromise = (async () => {
+        const agentInfo = await getAgentBySipUsername(parseSipUsername(agentChannel.name));
+        pending.agentId = agentInfo?.id ?? null;
+        console.log(`📤 Outbound call ${sessionId}: agent ${agentInfo?.name || 'unknown'} -> ${calledNumber}`);
+        await upsertCallLog({
+            session_id: sessionId,
+            caller: calledNumber,
+            direction: 'Outbound',
+            status: 'dialing',
+            agent_number: agentInfo?.phone || null
+        });
+    })();
+
+    const originatePromise = client.channels
+        .originate({
             endpoint: `PJSIP/${destination}@at-trunk`,
             app: APP_NAME,
             appArgs: `outbound-dest:${sessionId}`,
             callerId: OUTBOUND_CALLER_ID,
             timeout: 30
+        })
+        .catch(async err => {
+            console.error(`❌ Failed to originate outbound call to ${destination}:`, err.message);
+            // Wait for the concurrent 'dialing' write to land first (best
+            // effort — ignore if it itself failed) so this 'failed' write is
+            // guaranteed to be the last one in, not overwritten by a
+            // slower-to-land 'dialing' upsert racing in after it.
+            await logPromise.catch(() => {});
+            return finishOutboundCall(sessionId, 'failed');
         });
-    } catch (err) {
-        console.error(`❌ Failed to originate outbound call to ${destination}:`, err.message);
-        await finishOutboundCall(sessionId, 'failed');
-    }
+
+    await Promise.all([logPromise, originatePromise]);
 }
 
-// The destination leg enters Stasis as soon as it starts ringing (well
-// before answer) — bridging happens only once it actually reaches 'Up'.
+// The destination leg USUALLY enters Stasis while still ringing, well
+// before answer — but confirmed live (see the state-staleness bug this
+// replaced) that a quickly-answered call on this trunk can already be 'Up'
+// by the time StasisStart fires and we get control of it. That means
+// waiting on a *future* ChannelStateChange to 'Up' is not sufficient by
+// itself — there may never be one, since the channel is already there.
+// Checked both ways: immediately against the freshly-constructed channel
+// object's own state (accurate at this exact moment, unlike stashing this
+// same reference and re-reading .state off it after later events — that
+// staleness is what broke this originally), and via the listener for the
+// case where it's still genuinely ringing.
 async function bridgeOutboundDest(destChannel, sessionId) {
     const pending = outboundBySessionId.get(sessionId);
     if (!pending) {
@@ -449,14 +481,6 @@ async function bridgeOutboundDest(destChannel, sessionId) {
     }
     pending.destChannel = destChannel;
 
-    // ari-client's resource.on() callback receives a freshly-constructed
-    // channel object per event, built straight from that event's payload —
-    // it is NOT the same object as the `destChannel` closed over above, and
-    // that outer reference's .state never updates in place. Reading
-    // `destChannel.state` here always saw whatever state the channel was in
-    // at StasisStart (never 'Up'), so this never fired: the bridge never
-    // formed, the agent never heard the caller, and the call sat "connected"
-    // with nothing actually connected until the caller gave up and hung up.
     const onStateChange = (event, updatedChannel) => {
         if (updatedChannel.state !== 'Up') return;
         destChannel.removeListener('ChannelStateChange', onStateChange);
@@ -470,6 +494,11 @@ async function bridgeOutboundDest(destChannel, sessionId) {
             console.error('❌ Error finishing outbound call:', err.message)
         );
     });
+
+    if (destChannel.state === 'Up') {
+        destChannel.removeListener('ChannelStateChange', onStateChange);
+        completeOutboundBridge(sessionId).catch(err => console.error('❌ Error bridging outbound call (already up):', err.message));
+    }
 }
 
 async function completeOutboundBridge(sessionId) {
@@ -483,8 +512,14 @@ async function completeOutboundBridge(sessionId) {
     // 'failed' when it later ended (finishOutboundCall branches on exactly
     // this flag), and the agent's status would never actually flip to
     // on_call at all since that line was never reached.
-    if (!pending || pending.bridging || pending.bridged || !pending.destChannel) return;
+    if (!pending || pending.bridging || pending.bridged || !pending.destChannel) {
+        console.log(
+            `📡 completeOutboundBridge: skipping ${sessionId} — pending=${!!pending} bridging=${pending?.bridging} bridged=${pending?.bridged} hasDest=${!!pending?.destChannel}`
+        );
+        return;
+    }
     pending.bridging = true;
+    console.log(`📡 completeOutboundBridge: attempting to bridge ${sessionId}`);
 
     try {
         const bridge = await client.bridges.create({ type: 'mixing' });
