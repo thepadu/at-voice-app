@@ -450,6 +450,7 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
 // hanging up mid-prompt all just skip the rating write and hang up —
 // nothing here can leave the channel stuck.
 async function runRatingIvr(customerChannel, sessionId, voiceOpts) {
+    console.log(`⭐ ${sessionId}: playing rating prompt`);
     let customerGone = false;
     const onGone = () => {
         customerGone = true;
@@ -469,6 +470,8 @@ async function runRatingIvr(customerChannel, sessionId, voiceOpts) {
     if (!customerGone && digit && /^[1-5]$/.test(digit)) {
         await upsertCallLog({ session_id: sessionId, rating: Number(digit) });
         console.log(`⭐ ${sessionId} rated ${digit}/5`);
+    } else {
+        console.log(`⭐ ${sessionId}: no rating captured (customerGone=${customerGone}, digit=${digit ?? 'none'})`);
     }
 
     await customerChannel.hangup().catch(() => {});
