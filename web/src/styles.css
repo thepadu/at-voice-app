@@ -986,12 +986,25 @@ textarea {
     position: absolute;
     bottom: 66px;
     right: 0;
-    width: 260px;
+    width: 280px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 16px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+/* A brief scale+fade rather than an instant show — the dialer holds more
+   now (country code, recent numbers), so opening it should feel like
+   something appeared, not just toggled. */
+.dialer-popover-open {
+    animation: dialer-pop-in 0.15s ease-out;
+    transform-origin: bottom right;
+}
+
+@keyframes dialer-pop-in {
+    from { opacity: 0; transform: scale(0.92) translateY(6px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .dialer-popover-title {
@@ -1001,9 +1014,61 @@ textarea {
     margin-bottom: 10px;
 }
 
-.dialer-input {
-    text-align: center;
+.dialer-input-row {
+    display: flex;
+    gap: 6px;
     margin-bottom: 10px;
+}
+
+.dialer-country-code {
+    flex-shrink: 0;
+    background: var(--tint);
+    color: var(--brand);
+    border: none;
+    border-radius: 8px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.dialer-input {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+}
+
+.dialer-recent {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.dialer-recent-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--secondary);
+    margin-bottom: 6px;
+}
+
+.dialer-recent-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 6px 4px;
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+.dialer-recent-item:hover {
+    background: var(--page-bg);
 }
 
 .dialer-keypad {
@@ -1094,6 +1159,12 @@ textarea {
     font-size: 12px;
     color: var(--secondary);
     margin-bottom: 6px;
+}
+
+.analytics-section-label {
+    margin-top: 16px;
+    margin-bottom: 6px;
+    font-weight: 700;
 }
 
 /* ── Sidebar queue badge ───────────────────────────────────────────── */
@@ -1213,29 +1284,48 @@ textarea {
 
 /* ── Active-call status bar ───────────────────────────────────────── */
 
+/* Sticky (not just flow-positioned) and visually heavier than an ordinary
+   bar — a call in progress is the most important thing happening, so it
+   should stay on screen and read as such even while the agent scrolls or
+   works elsewhere in the page. Sits below the incoming/outgoing banners
+   (z-index 800) but above ordinary page content. */
 .status-bar {
+    position: sticky;
+    top: 0;
+    z-index: 500;
     flex-shrink: 0;
     background: var(--brand-dark);
     color: #fff;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 28px;
-    font-size: 13px;
+    padding: 14px 28px;
+    font-size: 15px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
 }
 
 .status-bar-info {
     display: flex;
     align-items: center;
     gap: 12px;
+    font-weight: 600;
 }
 
 .status-bar-dot {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     background: var(--brand-bright);
     animation: pulse-dot 1.5s infinite;
+}
+
+/* The rest of the shell visually steps back the instant a call starts
+   (see Layout.tsx) — dimmed, not disabled, since an agent still
+   legitimately needs to navigate or open a ticket mid-call. */
+.app-shell-on-call .sidebar,
+.app-shell-on-call .topbar {
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
 }
 
 @keyframes pulse-dot {
@@ -1245,7 +1335,7 @@ textarea {
 
 .status-bar-timer {
     background: rgba(255, 255, 255, 0.15);
-    padding: 2px 10px;
+    padding: 3px 12px;
     border-radius: 20px;
     font-weight: 700;
 }
@@ -1259,15 +1349,17 @@ textarea {
 .status-bar-ticket-btn {
     background: #fff;
     color: var(--brand-dark);
-    padding: 6px 14px;
-    font-size: 12px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 700;
 }
 
 .status-bar-control-btn {
     background: rgba(255, 255, 255, 0.15);
     color: #fff;
-    padding: 6px 14px;
-    font-size: 12px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 700;
 }
 
 .status-bar-control-active {
@@ -1278,8 +1370,9 @@ textarea {
 .status-bar-end-btn {
     background: var(--danger);
     color: #fff;
-    padding: 6px 14px;
-    font-size: 12px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 700;
 }
 
 /* ── Incoming call banner ─────────────────────────────────────────── */

@@ -346,6 +346,25 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         res.json({ count });
     });
 
+    // A live snapshot of the roster's presence, for the Analytics page —
+    // any authenticated user can see the aggregate counts (no names/phones
+    // exposed here, that's the requireSupervisor roster route below).
+    app.get('/api/agents/status-summary', requireAuth, async (req, res) => {
+        const { data, error } = await supabase.from('agents').select('status');
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load agent status summary' });
+        }
+
+        const counts = { available: 0, on_call: 0, ringing: 0, break: 0, offline: 0 };
+        data.forEach(a => {
+            if (a.status in counts) counts[a.status]++;
+        });
+
+        res.json({ counts });
+    });
+
     // Any authenticated user can see performance numbers (an agent needs
     // their own for the Dashboard's "My performance" card) — but the
     // response is name-based, not phone-number-based, so plain agents don't
@@ -382,7 +401,12 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             if (row.status === 'completed') {
                 stats[key].answered++;
                 stats[key].durationSum += row.duration || 0;
-            } else if (row.status === 'failed' || row.status === 'unknown') {
+            } else if (isMissed(row)) {
+                // Matches GET /api/calls' definition exactly — these two
+                // endpoints previously disagreed (this one also excluded
+                // 'forwarded'/'after_hours' and included the now-unused
+                // 'unknown'), which would have made any missed-call chart
+                // built from both sources visibly inconsistent.
                 stats[key].missed++;
             }
         });
@@ -886,6 +910,34 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         }
 
         res.json({ ticket: data });
+    });
+
+    // Aggregate counts for the Analytics page — by tag, by priority, and a
+    // resolution rate (Resolved / total). Cheap enough to just fetch and
+    // reduce in JS at this project's scale (same pattern as the calls/agent
+    // stats endpoints above) rather than a SQL aggregate query.
+    app.get('/api/tickets/stats', requireAuth, async (req, res) => {
+        const { data, error } = await supabase.from('tickets').select('tag, priority, status');
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to load ticket stats' });
+        }
+
+        const byTag = {};
+        const byPriority = {};
+        data.forEach(t => {
+            const tag = t.tag || 'Untagged';
+            byTag[tag] = (byTag[tag] || 0) + 1;
+            byPriority[t.priority] = (byPriority[t.priority] || 0) + 1;
+        });
+
+        res.json({
+            total: data.length,
+            resolved: data.filter(t => t.status === 'Resolved').length,
+            byTag,
+            byPriority
+        });
     });
 
     app.get('/api/ticket-tags', requireAuth, async (req, res) => {

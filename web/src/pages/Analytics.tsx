@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import CallsByHourChart from '../components/CallsByHourChart';
 import Pagination from '../components/Pagination';
+import StatusPill from '../components/StatusPill';
 
 type Summary = {
     total: number;
@@ -15,6 +16,18 @@ type Summary = {
 };
 
 type AgentStat = { id: number | null; name: string; total: number; answered: number; missed: number; avgHandleTime: number };
+
+type StatusCounts = { available: number; on_call: number; ringing: number; break: number; offline: number };
+
+type TicketStats = { total: number; resolved: number; byTag: Record<string, number>; byPriority: Record<string, number> };
+
+const STATUS_LABELS: Record<keyof StatusCounts, string> = {
+    available: 'Available',
+    on_call: 'On call',
+    ringing: 'Ringing',
+    break: 'On break',
+    offline: 'Offline'
+};
 
 const PAGE_SIZE = 10;
 
@@ -45,8 +58,23 @@ export default function Analytics() {
         refetchInterval: 30000
     });
 
+    const { data: statusSummaryData } = useQuery({
+        queryKey: ['agents-status-summary'],
+        queryFn: () => apiFetch('/api/agents/status-summary'),
+        refetchInterval: 15000
+    });
+
+    const { data: ticketStatsData } = useQuery({
+        queryKey: ['tickets-stats'],
+        queryFn: () => apiFetch('/api/tickets/stats'),
+        refetchInterval: 30000
+    });
+
     const summary: Summary | undefined = callsData?.summary;
     const agentStats: AgentStat[] = useMemo(() => statsData?.agents ?? [], [statsData]);
+    const statusCounts: StatusCounts | undefined = statusSummaryData?.counts;
+    const ticketStats: TicketStats | undefined = ticketStatsData;
+    const totalAgents = statusCounts ? Object.values(statusCounts).reduce((sum, n) => sum + n, 0) : 0;
 
     const ranked = useMemo(() => [...agentStats].sort((a, b) => b.answered - a.answered), [agentStats]);
     const totalPages = Math.max(1, Math.ceil(ranked.length / PAGE_SIZE));
@@ -76,6 +104,14 @@ export default function Analytics() {
                 <div className="card">
                     <div className="card-label">Outbound</div>
                     <p>{summary?.outbound ?? '—'}</p>
+                </div>
+                <div className="card">
+                    <div className="card-label">Login Issues</div>
+                    <p>{summary?.login ?? '—'}</p>
+                </div>
+                <div className="card">
+                    <div className="card-label">Deposit Issues</div>
+                    <p>{summary?.deposit ?? '—'}</p>
                 </div>
                 <div className="card">
                     <div className="card-label">Agent Requests</div>
@@ -108,6 +144,46 @@ export default function Analytics() {
                     <span>Outside business hours</span>
                     <strong>{summary?.missedByReason.afterHours ?? 0}</strong>
                 </div>
+            </div>
+
+            <div className="panel">
+                <h3>Team status right now</h3>
+                {statusCounts && totalAgents === 0 && <p className="empty">No agents on the roster yet.</p>}
+                {statusCounts &&
+                    totalAgents > 0 &&
+                    (Object.keys(STATUS_LABELS) as (keyof StatusCounts)[]).map(key => (
+                        <div className="analytics-row" key={key}>
+                            <StatusPill value={key} label={STATUS_LABELS[key]} />
+                            <strong>{statusCounts[key]}</strong>
+                        </div>
+                    ))}
+            </div>
+
+            <div className="panel">
+                <h3>Tickets</h3>
+                {ticketStats && ticketStats.total === 0 && <p className="empty">No tickets logged yet.</p>}
+                {ticketStats && ticketStats.total > 0 && (
+                    <>
+                        <div className="analytics-row">
+                            <span>Resolution rate</span>
+                            <strong>{Math.round((ticketStats.resolved / ticketStats.total) * 100)}%</strong>
+                        </div>
+                        <p className="hint analytics-section-label">By tag</p>
+                        {Object.entries(ticketStats.byTag).map(([tag, count]) => (
+                            <div className="analytics-row" key={tag}>
+                                <span>{tag}</span>
+                                <strong>{count}</strong>
+                            </div>
+                        ))}
+                        <p className="hint analytics-section-label">By priority</p>
+                        {Object.entries(ticketStats.byPriority).map(([priority, count]) => (
+                            <div className="analytics-row" key={priority}>
+                                <span>{priority}</span>
+                                <strong>{count}</strong>
+                            </div>
+                        ))}
+                    </>
+                )}
             </div>
 
             <div className="panel">
