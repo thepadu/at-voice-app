@@ -1,7 +1,7 @@
 // Moneto brand palette: teal for "good/active" states, a lighter tealGreen
 // for "in progress right now", gold-orange for "needs attention soon", and
 // coral for anything that didn't go as planned.
-const COLORS: Record<string, string> = {
+export const STATUS_COLORS: Record<string, string> = {
     available: '#17A697',
     on_call: '#4DB8AA',
     ringing: '#F39C12',
@@ -20,7 +20,7 @@ const COLORS: Record<string, string> = {
 };
 
 export default function StatusPill({ value, label }: { value: string; label?: string }) {
-    const color = COLORS[value] || '#757575';
+    const color = STATUS_COLORS[value] || '#757575';
     return (
         <span className="status-pill" style={{ background: color }}>
             {label ?? value.replace('_', ' ')}

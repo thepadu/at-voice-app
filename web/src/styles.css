@@ -38,13 +38,13 @@
 
 body {
     margin: 0;
-    font-family: 'Public Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--page-bg);
     color: var(--ink);
 }
 
 h1, h2, h3, h4 {
-    font-family: 'Sora', -apple-system, sans-serif;
+    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
 }
 
 /* ── App shell ─────────────────────────────────────────────────────── */
@@ -112,13 +112,13 @@ h1, h2, h3, h4 {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Sora', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 800;
     color: var(--brand-dark);
 }
 
 .sidebar-logo span {
-    font-family: 'Sora', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 700;
     font-size: 17px;
     color: #ffffff;
@@ -228,7 +228,7 @@ h1, h2, h3, h4 {
 }
 
 .topbar-title {
-    font-family: 'Sora', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 700;
     font-size: 19px;
     color: var(--ink);
@@ -325,7 +325,7 @@ h1, h2, h3, h4 {
 }
 
 .card p {
-    font-family: 'Sora', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-size: 26px;
     font-weight: 800;
     color: var(--ink);
@@ -336,6 +336,29 @@ h1, h2, h3, h4 {
     font-size: 12px;
     color: var(--secondary);
     font-weight: 600;
+}
+
+.card-multi-stats {
+    display: flex;
+    gap: 14px;
+    margin-top: 8px;
+}
+
+.card-multi-stat {
+    display: flex;
+    flex-direction: column;
+}
+
+.card-multi-value {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.card-multi-sublabel {
+    font-size: 11px;
+    color: var(--muted);
 }
 
 .panel {
@@ -430,6 +453,23 @@ tr:not(:last-child) td {
     border-color: var(--brand-dark);
 }
 
+.direction-icon {
+    display: block;
+    vertical-align: middle;
+}
+
+.direction-icon-incoming {
+    color: var(--brand);
+}
+
+.direction-icon-outgoing {
+    color: var(--brand-dark);
+}
+
+.direction-icon-missed {
+    color: var(--danger);
+}
+
 .calls-filters {
     display: flex;
     align-items: flex-end;
@@ -503,6 +543,22 @@ tr:not(:last-child) td {
     text-decoration: none;
 }
 
+.btn-icon {
+    background: none;
+    border: none;
+    padding: 4px;
+    color: var(--secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 6px;
+}
+
+.btn-icon:hover {
+    background: var(--page-bg);
+    color: var(--ink);
+}
+
 .btn-link-danger {
     color: var(--danger);
 }
@@ -524,11 +580,52 @@ tr:not(:last-child) td {
     text-transform: capitalize;
 }
 
-.pill-toggle {
-    background: none;
+.status-dropdown {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 20px;
+    padding: 5px 22px 5px 12px;
+}
+
+.status-dropdown-disabled {
+    opacity: 0.85;
+}
+
+.status-dropdown-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
     border: none;
-    padding: 0;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    text-transform: capitalize;
     cursor: pointer;
+    padding: 0;
+    padding-right: 2px;
+}
+
+.status-dropdown-select:disabled {
+    cursor: default;
+}
+
+/* Native <select> dropdown lists can't inherit the pill's background, so
+   options fall back to plain white/black — readable, just not brand-colored,
+   which is an acceptable tradeoff for a real native control (keyboard/a11y
+   support) over a hand-rolled listbox. */
+.status-dropdown-select option {
+    color: #000;
+    background: #fff;
+    text-transform: capitalize;
+}
+
+.status-dropdown-chevron {
+    position: absolute;
+    right: 7px;
+    pointer-events: none;
+    color: #fff;
 }
 
 .stage-badge {
@@ -619,6 +716,54 @@ textarea {
 
 .modal h3 {
     margin-top: 0;
+}
+
+.modal-lg {
+    max-width: 560px;
+}
+
+.modal-lg h4 {
+    margin-bottom: 8px;
+}
+
+.call-details-summary {
+    display: flex;
+    gap: 24px;
+    padding: 14px 0;
+    margin-bottom: 10px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.call-details-label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--secondary);
+    margin-bottom: 4px;
+}
+
+.call-details-ticket {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.call-details-ticket-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.call-details-history-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--secondary);
 }
 
 .modal-actions {
@@ -850,7 +995,7 @@ textarea {
 }
 
 .dialer-popover-title {
-    font-family: 'Sora', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 700;
     font-size: 13px;
     margin-bottom: 10px;
@@ -937,7 +1082,7 @@ textarea {
 }
 
 .analytics-popover-title {
-    font-family: 'Sora', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 700;
     font-size: 13px;
     margin-bottom: 10px;
@@ -1460,6 +1605,13 @@ textarea {
        room for the title and the status control an agent actually needs. */
     .topbar-badge,
     .topbar-theme-toggle {
+        display: none;
+    }
+
+    /* Same reasoning as the topbar badge above — supervisor-facing
+       analytics, not call-handling, and it competes for the same
+       thumb-reach corner as the dialer FAB on a phone-width screen. */
+    .floating-analytics {
         display: none;
     }
 

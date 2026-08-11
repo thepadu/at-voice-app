@@ -150,7 +150,11 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(500).json({ error: 'Failed to load calls' });
         }
 
-        let calls = data.filter(row => !isAgentLegRow(row));
+        let calls = data.filter(row => !isAgentLegRow(row)).map(row => ({
+            ...row,
+            direction: classifyDirection(row),
+            missed: isMissed(row)
+        }));
 
         if (tab === 'incoming') calls = calls.filter(row => classifyDirection(row) === 'incoming');
         if (tab === 'outgoing') calls = calls.filter(row => classifyDirection(row) === 'outgoing');
@@ -408,34 +412,6 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             total: allAgents.length,
             totalPages: Math.max(1, Math.ceil(allAgents.length / pageSize))
         });
-    });
-
-    app.post('/api/calls/:sessionId/ticket', requireAuth, async (req, res) => {
-        const { sessionId } = req.params;
-        const { ticket_status } = req.body;
-
-        if (!['open', 'in_progress', 'resolved'].includes(ticket_status)) {
-            return res.status(400).json({ error: 'Invalid ticket status' });
-        }
-
-        const { data, error } = await supabase
-            .from('call_logs')
-            .update({ ticket_status })
-            .eq('session_id', sessionId)
-            .select('session_id');
-
-        if (error) {
-            console.error(error);
-            return res.status(500).json({ error: 'Failed to update ticket' });
-        }
-        // Supabase's .update() doesn't error on zero rows matched — without
-        // this check, a stale/mistyped sessionId would report success while
-        // the agent's ticket-status change silently never happened.
-        if (!data.length) {
-            return res.status(404).json({ error: 'Call not found' });
-        }
-
-        res.json({ ok: true });
     });
 
     // Lets an agent flip their own presence without needing to already know
@@ -820,17 +796,23 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // Any authenticated user can read/create/update tickets — this is
     // day-to-day agent work, not roster/config management.
 
-    // GET /api/tickets?page=1&pageSize=50
+    // GET /api/tickets?page=1&pageSize=50&session_id=... — the session_id
+    // filter is for the call-details drawer (a call can have 0-N tickets,
+    // there's no unique constraint on tickets.session_id).
     app.get('/api/tickets', requireAuth, async (req, res) => {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
         const rangeStart = (page - 1) * pageSize;
 
-        const { data, error, count } = await supabase
+        let query = supabase
             .from('tickets')
             .select('*, agents(name)', { count: 'exact' })
             .order('created_at', { ascending: false })
             .range(rangeStart, rangeStart + pageSize - 1);
+
+        if (req.query.session_id) query = query.eq('session_id', req.query.session_id);
+
+        const { data, error, count } = await query;
 
         if (error) {
             console.error(error);

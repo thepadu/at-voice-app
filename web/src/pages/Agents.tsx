@@ -5,8 +5,10 @@ import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
 import { useModalA11y } from '../lib/useModalA11y';
 import ConfirmDialog from '../components/ConfirmDialog';
-import StatusPill from '../components/StatusPill';
+import StatusDropdown from '../components/StatusDropdown';
 import Pagination from '../components/Pagination';
+
+const STATUS_OPTIONS = ['available', 'break', 'offline'];
 
 const PAGE_SIZE = 20;
 
@@ -101,18 +103,6 @@ export default function Agents() {
         setFormOpen(true);
     }
 
-    // Available → Break → Offline → Available. See setAgentStatus() in
-    // api.js for what "available" actually does — a direct flag flip for
-    // agents on a browser softphone, a real phone call for anyone not yet
-    // migrated. on_call/ringing are system-managed; the toggle treats
-    // clicking either as "give up and go offline."
-    function nextStatus(agent: Agent): Agent['status'] {
-        if (agent.status === 'available') return 'break';
-        if (agent.status === 'break') return 'offline';
-        if (agent.status === 'offline') return 'available';
-        return 'offline';
-    }
-
     const containerRef = useModalA11y(formOpen, () => setFormOpen(false));
 
     return (
@@ -154,19 +144,17 @@ export default function Agents() {
                                 </div>
                             </div>
                             <div className="agent-card-status">
-                                <button
-                                    className="pill-toggle"
-                                    onClick={() => toggleStatus.mutate({ id: agent.id, status: nextStatus(agent) })}
-                                    title={
-                                        agent.status === 'ringing'
-                                            ? 'Calling their phone now…'
-                                            : agent.status === 'on_call'
-                                                ? 'Click to go offline'
-                                                : undefined
-                                    }
-                                >
-                                    <StatusPill value={agent.status} />
-                                </button>
+                                {/* See setAgentStatus() in api.js for what "available" actually
+                                    does — a direct flag flip for agents on a browser softphone,
+                                    a real phone call for anyone not yet migrated. on_call/ringing
+                                    are system-managed but still overridable here, so a supervisor
+                                    can force a stuck agent back to any of the 3 real states. */}
+                                <StatusDropdown
+                                    value={agent.status}
+                                    options={STATUS_OPTIONS}
+                                    title={agent.status === 'ringing' ? 'Calling their phone now…' : undefined}
+                                    onChange={status => toggleStatus.mutate({ id: agent.id, status: status as Agent['status'] })}
+                                />
                                 {agent.role === 'supervisor' && (
                                     <span className="status-pill" style={{ background: '#2C3E50', marginLeft: 6 }}>
                                         Supervisor

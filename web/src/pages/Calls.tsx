@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { PhoneIncoming, PhoneOutgoing, PhoneMissed, Info } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { useSoftphone } from '../lib/softphone';
 import StatusPill from '../components/StatusPill';
 import Pagination from '../components/Pagination';
+import CallDetailsDrawer from '../components/CallDetailsDrawer';
 
 type Call = {
     session_id: string;
@@ -13,14 +15,31 @@ type Call = {
     created_at: string;
     agent_name?: string | null;
     called_back?: boolean;
+    direction?: 'incoming' | 'outgoing';
+    missed?: boolean;
 };
 
-type Tab = 'incoming' | 'outgoing' | 'missed';
+type Tab = 'all' | 'incoming' | 'outgoing' | 'missed';
 const TABS: { value: Tab; label: string }[] = [
+    { value: 'all', label: 'All' },
     { value: 'incoming', label: 'Incoming' },
     { value: 'outgoing', label: 'Outbound' },
     { value: 'missed', label: 'Missed' }
 ];
+
+function DirectionIcon({ call }: { call: Call }) {
+    if (call.missed) return <PhoneMissed size={16} className="direction-icon direction-icon-missed" aria-label="Missed" />;
+    if (call.direction === 'outgoing') return <PhoneOutgoing size={16} className="direction-icon direction-icon-outgoing" aria-label="Outbound" />;
+    return <PhoneIncoming size={16} className="direction-icon direction-icon-incoming" aria-label="Incoming" />;
+}
+
+function DetailsButton({ onOpen }: { onOpen: () => void }) {
+    return (
+        <button className="btn-icon" onClick={onOpen} title="View details" aria-label="View details">
+            <Info size={16} />
+        </button>
+    );
+}
 
 const PAGE_SIZE = 25;
 
@@ -37,8 +56,9 @@ function missedReason(status: string | null) {
 }
 
 export default function Calls() {
-    const [tab, setTab] = useState<Tab>('incoming');
+    const [tab, setTab] = useState<Tab>('all');
     const [page, setPage] = useState(1);
+    const [detailsCall, setDetailsCall] = useState<Call | null>(null);
     const { placeCall } = useSoftphone();
 
     const [draftFrom, setDraftFrom] = useState('');
@@ -126,6 +146,39 @@ export default function Calls() {
                 </div>
             </div>
 
+            {tab === 'all' && (
+                <div className="panel">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Caller / Number</th>
+                                <th>Agent</th>
+                                <th>Status</th>
+                                <th>Time</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {calls.length === 0 && (
+                                <tr><td colSpan={6} className="empty">No calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
+                            )}
+                            {calls.map(call => (
+                                <tr key={call.session_id}>
+                                    <td><DirectionIcon call={call} /></td>
+                                    <td>{call.caller}</td>
+                                    <td>{call.agent_name ?? '—'}</td>
+                                    <td><StatusPill value={call.status ?? 'unknown'} /></td>
+                                    <td>{new Date(call.created_at).toLocaleString()}</td>
+                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+                </div>
+            )}
+
             {tab === 'incoming' && (
                 <div className="panel">
                     <table>
@@ -135,11 +188,12 @@ export default function Calls() {
                                 <th>Agent</th>
                                 <th>Status</th>
                                 <th>Time</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             {calls.length === 0 && (
-                                <tr><td colSpan={4} className="empty">No incoming calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
+                                <tr><td colSpan={5} className="empty">No incoming calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
                             )}
                             {calls.map(call => (
                                 <tr key={call.session_id}>
@@ -147,6 +201,7 @@ export default function Calls() {
                                     <td>{call.agent_name ?? '—'}</td>
                                     <td><StatusPill value={call.status ?? 'unknown'} /></td>
                                     <td>{new Date(call.created_at).toLocaleString()}</td>
+                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -166,11 +221,12 @@ export default function Calls() {
                                 <th>Answered</th>
                                 <th>Outcome</th>
                                 <th>Time</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             {calls.length === 0 && (
-                                <tr><td colSpan={6} className="empty">No outbound calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
+                                <tr><td colSpan={7} className="empty">No outbound calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
                             )}
                             {calls.map(call => (
                                 <tr key={call.session_id}>
@@ -180,6 +236,7 @@ export default function Calls() {
                                     <td>{answeredLabel(call.status)}</td>
                                     <td><StatusPill value={call.status ?? 'unknown'} /></td>
                                     <td>{new Date(call.created_at).toLocaleString()}</td>
+                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -197,11 +254,12 @@ export default function Calls() {
                                 <th>Reason</th>
                                 <th>Time</th>
                                 <th></th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             {calls.length === 0 && (
-                                <tr><td colSpan={4} className="empty">No missed calls{filtersActive ? ' match these filters.' : ' outstanding.'}</td></tr>
+                                <tr><td colSpan={5} className="empty">No missed calls{filtersActive ? ' match these filters.' : ' outstanding.'}</td></tr>
                             )}
                             {calls.map(call => (
                                 <tr key={call.session_id}>
@@ -217,6 +275,7 @@ export default function Calls() {
                                             {call.called_back ? '✓ Called back' : 'Call back'}
                                         </button>
                                     </td>
+                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -224,6 +283,8 @@ export default function Calls() {
                     <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
                 </div>
             )}
+
+            <CallDetailsDrawer call={detailsCall} onClose={() => setDetailsCall(null)} />
         </div>
     );
 }
