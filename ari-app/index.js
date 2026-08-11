@@ -19,7 +19,7 @@ const ari = require('ari-client');
 const { normalizePhone } = require('./lib/phone');
 const { synthesize } = require('./tts');
 const {
-    getIvrGreeting,
+    getIvrConfig,
     getIvrOptions,
     upsertCallLog,
     getAvailableAgentsWithSip,
@@ -79,8 +79,8 @@ function isWithinBusinessHours(hours) {
     return minutesNow >= openMinutes && minutesNow < closeMinutes;
 }
 
-async function playText(channel, text) {
-    const soundName = await synthesize(text);
+async function playText(channel, text, voiceOpts) {
+    const soundName = await synthesize(text, voiceOpts);
     const playback = client.Playback();
     // Not awaited — channel.play() resolves once the command is accepted,
     // not once playback finishes; PlaybackFinished is what actually signals
@@ -147,7 +147,9 @@ async function getHoldingBridge() {
 }
 
 async function runIvrMenu(channel, sessionId) {
-    const [greeting, options] = await Promise.all([getIvrGreeting(), getIvrOptions()]);
+    const [ivrConfig, options] = await Promise.all([getIvrConfig(), getIvrOptions()]);
+    const { greeting, ttsVoice, ttsSpeedScale } = ivrConfig;
+    const voiceOpts = { voiceKey: ttsVoice, speedScale: ttsSpeedScale };
 
     const menuText = options.length
         ? `${greeting.trim()} ${options.map(o => `Press ${o.digit} for ${o.label}.`).join(' ')}`
@@ -158,12 +160,12 @@ async function runIvrMenu(channel, sessionId) {
     // side loses gets cancelled explicitly — see waitForDigitOrTimeout's
     // comment on why that matters.
     const digitWait = waitForDigitOrTimeout(channel.id, MENU_TIMEOUT_MS);
-    const digit = await Promise.race([playText(channel, menuText).then(() => null), digitWait.promise]);
+    const digit = await Promise.race([playText(channel, menuText, voiceOpts).then(() => null), digitWait.promise]);
     digitWait.cancel();
 
     if (!digit) {
         await upsertCallLog({ session_id: sessionId, status: 'input_received' });
-        await playText(channel, 'No option was selected.');
+        await playText(channel, 'No option was selected.', voiceOpts);
         return runIvrMenu(channel, sessionId);
     }
 
@@ -172,7 +174,7 @@ async function runIvrMenu(channel, sessionId) {
     const option = options.find(o => o.digit === digit);
 
     if (!option) {
-        await playText(channel, 'Invalid input. Please try again.');
+        await playText(channel, 'Invalid input. Please try again.', voiceOpts);
         return runIvrMenu(channel, sessionId);
     }
 
@@ -181,7 +183,7 @@ async function runIvrMenu(channel, sessionId) {
     }
 
     if (option.action === 'transfer_agent') {
-        if (option.response_message) await playText(channel, option.response_message);
+        if (option.response_message) await playText(channel, option.response_message, voiceOpts);
 
         // Forwarding is a fallback for nobody being logged in at all — an
         // agent or two being busy on other calls is the normal case and
@@ -204,7 +206,7 @@ async function runIvrMenu(channel, sessionId) {
     }
 
     // action === 'message'
-    if (option.response_message) await playText(channel, option.response_message);
+    if (option.response_message) await playText(channel, option.response_message, voiceOpts);
     await upsertCallLog({ session_id: sessionId, status: 'completed' });
     await channel.hangup().catch(() => {});
 }
@@ -664,7 +666,8 @@ async function main() {
             if (hours?.enabled && !isWithinBusinessHours(hours)) {
                 console.log(`🌙 ${sessionId}: outside business hours, playing after-hours message`);
                 await upsertCallLog({ session_id: sessionId, status: 'after_hours' });
-                await playText(channel, hours.after_hours_message);
+                const { ttsVoice, ttsSpeedScale } = await getIvrConfig();
+                await playText(channel, hours.after_hours_message, { voiceKey: ttsVoice, speedScale: ttsSpeedScale });
                 await channel.hangup().catch(() => {});
                 return;
             }

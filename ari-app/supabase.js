@@ -9,13 +9,22 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
     realtime: { transport: ws }
 });
 
-async function getIvrGreeting() {
-    const { data, error } = await supabase.from('ivr_config').select('greeting').eq('id', 1).single();
+// Re-fetched fresh on every call (and every runIvrMenu recursion) rather
+// than cached — a supervisor editing the greeting or switching voice/speed
+// in the dashboard takes effect on the very next prompt, not after a
+// restart. Falls back to safe defaults on error so a config problem can
+// never itself break the whole IVR.
+async function getIvrConfig() {
+    const { data, error } = await supabase
+        .from('ivr_config')
+        .select('greeting, tts_voice, tts_speed_scale')
+        .eq('id', 1)
+        .single();
     if (error) {
         console.error('❌ Failed to load ivr_config:', error.message);
-        return 'Welcome to Chumz customer support.';
+        return { greeting: 'Welcome to Chumz customer support.', ttsVoice: null, ttsSpeedScale: 1.0 };
     }
-    return data.greeting;
+    return { greeting: data.greeting, ttsVoice: data.tts_voice, ttsSpeedScale: data.tts_speed_scale ?? 1.0 };
 }
 
 async function getIvrOptions() {
@@ -201,7 +210,7 @@ async function reconcileGhostAgents() {
 
 module.exports = {
     supabase,
-    getIvrGreeting,
+    getIvrConfig,
     getIvrOptions,
     upsertCallLog,
     getAvailableAgentsWithSip,

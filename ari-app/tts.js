@@ -11,7 +11,16 @@ const fs = require('fs');
 const path = require('path');
 
 const PIPER_BIN = process.env.PIPER_BIN || '/opt/piper/piper/piper';
-const VOICE_MODEL = process.env.PIPER_VOICE_MODEL || '/opt/piper/voices/en_US-lessac-medium.onnx';
+const DEFAULT_VOICE_MODEL = process.env.PIPER_VOICE_MODEL || '/opt/piper/voices/en_US-lessac-medium.onnx';
+// A short key (not a filesystem path) is what callers/the DB pass in — this
+// allowlist is the only thing that turns a key into an actual model path,
+// so a bad/typo'd value in ivr_config can never point Piper at an arbitrary
+// file. Unknown/missing key falls back to DEFAULT_VOICE_MODEL, so existing
+// deployments with nothing configured keep working unchanged.
+const VOICE_MODELS = {
+    lady: process.env.PIPER_VOICE_LADY || DEFAULT_VOICE_MODEL,
+    man: process.env.PIPER_VOICE_MAN || DEFAULT_VOICE_MODEL
+};
 // NOT /var/lib/asterisk/sounds/custom — on this Debian/Ubuntu packaging,
 // Asterisk's actual "en/custom/" sound-resolution path is a symlink chain
 // (/usr/share/asterisk/sounds/en/custom -> /usr/local/share/asterisk/sounds)
@@ -53,8 +62,16 @@ const inFlight = new Map();
 
 // Returns the Asterisk sound name (e.g. "custom/tts-ab12cd34") for the given
 // text — the caller passes this straight to channel.play({ media: `sound:${name}` }).
-async function synthesize(text) {
-    const hash = crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+// voiceKey/speedScale are folded into the cache key — otherwise switching
+// voice or speed for already-synthesized text would silently keep serving
+// the old cached audio, since the hash used to be text-only.
+async function synthesize(text, { voiceKey, speedScale = 1.0 } = {}) {
+    const voiceModel = VOICE_MODELS[voiceKey] || DEFAULT_VOICE_MODEL;
+    const hash = crypto
+        .createHash('sha256')
+        .update(`${voiceKey || 'default'}|${speedScale}|${text}`)
+        .digest('hex')
+        .slice(0, 16);
     const soundName = `custom/tts-${hash}`;
     // Raw headerless mu-law — no WAV container to get subtly wrong, and it's
     // literally the codec (PCMU) AT's trunk uses, so Asterisk needs zero
@@ -73,7 +90,7 @@ async function synthesize(text) {
     const rawPath = path.join('/tmp', `tts-${hash}-raw.wav`);
 
     const synthesisPromise = (async () => {
-        await run(PIPER_BIN, ['--model', VOICE_MODEL, '--output_file', rawPath], text);
+        await run(PIPER_BIN, ['--model', voiceModel, '--length_scale', String(speedScale), '--output_file', rawPath], text);
         await run('sox', [rawPath, '-r', '8000', '-c', '1', '-e', 'mu-law', '-t', 'ul', ulawPath]);
         fs.unlinkSync(rawPath);
     })();

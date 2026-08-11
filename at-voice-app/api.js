@@ -705,26 +705,41 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // ── IVR menu (supervisors only) ─────────────────────────────────────
 
     app.get('/api/ivr-config', requireSupervisor, async (req, res) => {
-        const { data, error } = await supabase.from('ivr_config').select('greeting').eq('id', 1).single();
+        const { data, error } = await supabase.from('ivr_config').select('greeting, tts_voice, tts_speed_scale').eq('id', 1).single();
 
         if (error) {
             console.error(error);
             return res.status(500).json({ error: 'Failed to load IVR greeting' });
         }
 
-        res.json({ greeting: data.greeting });
+        res.json({ greeting: data.greeting, tts_voice: data.tts_voice, tts_speed_scale: data.tts_speed_scale });
     });
 
+    // 'lady'/'man' are the only voice keys ari-app/tts.js's allowlist
+    // currently maps to a real Piper model — null means "use the server's
+    // default voice" (today's unconfigured behavior).
+    const IVR_VOICES = ['lady', 'man', null];
+
     app.patch('/api/ivr-config', requireSupervisor, async (req, res) => {
-        const { greeting } = req.body;
+        const { greeting, tts_voice, tts_speed_scale } = req.body;
 
         if (!greeting || !greeting.trim()) {
             return res.status(400).json({ error: 'Greeting cannot be empty' });
         }
+        if (tts_voice !== undefined && !IVR_VOICES.includes(tts_voice)) {
+            return res.status(400).json({ error: 'Invalid voice' });
+        }
+        if (tts_speed_scale !== undefined && (typeof tts_speed_scale !== 'number' || tts_speed_scale < 0.5 || tts_speed_scale > 2.0)) {
+            return res.status(400).json({ error: 'Speed must be between 0.5 and 2.0' });
+        }
+
+        const updates = { greeting: greeting.trim(), updated_at: new Date().toISOString() };
+        if (tts_voice !== undefined) updates.tts_voice = tts_voice;
+        if (tts_speed_scale !== undefined) updates.tts_speed_scale = tts_speed_scale;
 
         const { data, error } = await supabase
             .from('ivr_config')
-            .update({ greeting: greeting.trim(), updated_at: new Date().toISOString() })
+            .update(updates)
             .eq('id', 1)
             .select('id');
 

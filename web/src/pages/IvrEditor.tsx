@@ -45,6 +45,8 @@ export default function IvrEditor() {
     const options: IvrOption[] = useMemo(() => optionsData?.options ?? [], [optionsData]);
 
     const [greeting, setGreeting] = useState('');
+    const [ttsVoice, setTtsVoice] = useState<string>('');
+    const [ttsSpeedScale, setTtsSpeedScale] = useState(1.0);
     const [drafts, setDrafts] = useState<Record<string, IvrOption>>({});
     const [addOpen, setAddOpen] = useState(false);
     const [addForm, setAddForm] = useState(EMPTY_FORM);
@@ -53,7 +55,9 @@ export default function IvrEditor() {
 
     useEffect(() => {
         if (greetingData?.greeting !== undefined) setGreeting(greetingData.greeting);
-    }, [greetingData?.greeting]);
+        if (greetingData?.tts_voice !== undefined) setTtsVoice(greetingData.tts_voice ?? '');
+        if (greetingData?.tts_speed_scale !== undefined) setTtsSpeedScale(greetingData.tts_speed_scale ?? 1.0);
+    }, [greetingData]);
 
     useEffect(() => {
         setDrafts(Object.fromEntries(options.map(o => [o.digit, o])));
@@ -64,10 +68,22 @@ export default function IvrEditor() {
     }
 
     const saveGreeting = useMutation({
-        mutationFn: () => apiFetch('/api/ivr-config', { method: 'PATCH', body: JSON.stringify({ greeting }) }),
-        onSuccess: () => showToast('Greeting saved'),
+        mutationFn: () =>
+            apiFetch('/api/ivr-config', {
+                method: 'PATCH',
+                body: JSON.stringify({ greeting, tts_voice: ttsVoice || null, tts_speed_scale: ttsSpeedScale })
+            }),
+        onSuccess: () => {
+            showToast('Greeting saved');
+            queryClient.invalidateQueries({ queryKey: ['ivr-config'] });
+        },
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
     });
+
+    const greetingDirty =
+        greeting !== (greetingData?.greeting ?? '') ||
+        ttsVoice !== (greetingData?.tts_voice ?? '') ||
+        ttsSpeedScale !== (greetingData?.tts_speed_scale ?? 1.0);
 
     const saveOption = useMutation({
         mutationFn: (digit: string) => {
@@ -134,11 +150,36 @@ export default function IvrEditor() {
                         </p>
                     )}
                     <textarea value={greeting} onChange={e => setGreeting(e.target.value)} rows={2} />
+
+                    <label>
+                        Voice
+                        <select value={ttsVoice} onChange={e => setTtsVoice(e.target.value)}>
+                            <option value="">Default</option>
+                            <option value="lady">Lady</option>
+                            <option value="man">Man</option>
+                        </select>
+                    </label>
+                    <label>
+                        Speaking speed ({ttsSpeedScale.toFixed(2)}× {ttsSpeedScale > 1 ? 'slower' : ttsSpeedScale < 1 ? 'faster' : ''})
+                        <input
+                            type="range"
+                            min={0.5}
+                            max={2.0}
+                            step={0.05}
+                            value={ttsSpeedScale}
+                            onChange={e => setTtsSpeedScale(Number(e.target.value))}
+                        />
+                    </label>
+                    <p className="hint">
+                        Length scale, not playback speed — higher plays slower with the same natural cadence.
+                        {ttsVoice === 'man' && ' The "man" voice needs a second voice model installed on the server to sound different from the default.'}
+                    </p>
+
                     <div className="modal-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }}>
                         <button
                             className="btn btn-primary"
                             onClick={() => saveGreeting.mutate()}
-                            disabled={saveGreeting.isPending || greeting === greetingData?.greeting}
+                            disabled={saveGreeting.isPending || !greetingDirty}
                         >
                             Save greeting
                         </button>
