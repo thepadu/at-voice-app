@@ -705,14 +705,23 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // ── IVR menu (supervisors only) ─────────────────────────────────────
 
     app.get('/api/ivr-config', requireSupervisor, async (req, res) => {
-        const { data, error } = await supabase.from('ivr_config').select('greeting, tts_voice, tts_speed_scale').eq('id', 1).single();
+        const { data, error } = await supabase
+            .from('ivr_config')
+            .select('greeting, tts_voice, tts_speed_scale, rating_enabled')
+            .eq('id', 1)
+            .single();
 
         if (error) {
             console.error(error);
             return res.status(500).json({ error: 'Failed to load IVR greeting' });
         }
 
-        res.json({ greeting: data.greeting, tts_voice: data.tts_voice, tts_speed_scale: data.tts_speed_scale });
+        res.json({
+            greeting: data.greeting,
+            tts_voice: data.tts_voice,
+            tts_speed_scale: data.tts_speed_scale,
+            rating_enabled: data.rating_enabled
+        });
     });
 
     // 'lady'/'man' are the only voice keys ari-app/tts.js's allowlist
@@ -721,7 +730,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     const IVR_VOICES = ['lady', 'man', null];
 
     app.patch('/api/ivr-config', requireSupervisor, async (req, res) => {
-        const { greeting, tts_voice, tts_speed_scale } = req.body;
+        const { greeting, tts_voice, tts_speed_scale, rating_enabled } = req.body;
 
         if (!greeting || !greeting.trim()) {
             return res.status(400).json({ error: 'Greeting cannot be empty' });
@@ -736,6 +745,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         const updates = { greeting: greeting.trim(), updated_at: new Date().toISOString() };
         if (tts_voice !== undefined) updates.tts_voice = tts_voice;
         if (tts_speed_scale !== undefined) updates.tts_speed_scale = tts_speed_scale;
+        if (rating_enabled !== undefined) updates.rating_enabled = !!rating_enabled;
 
         const { data, error } = await supabase
             .from('ivr_config')

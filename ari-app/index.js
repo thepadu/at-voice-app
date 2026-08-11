@@ -39,6 +39,7 @@ const ARI_USERNAME = process.env.ARI_USERNAME;
 const ARI_PASSWORD = process.env.ARI_PASSWORD;
 const APP_NAME = process.env.ARI_APP_NAME || 'chumz-ivr';
 const MENU_TIMEOUT_MS = 15000;
+const RATING_TIMEOUT_MS = 8000;
 const QUEUE_POLL_MS = 3000;
 const GHOST_AGENT_POLL_MS = 30000;
 const HOLDING_BRIDGE_NAME = 'support-queue';
@@ -373,14 +374,19 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
     // semantics, an event that fires before you subscribe is simply missed.
     // The agent would be left claimed, on_call, and bridged to a channel
     // that no longer existed, with nothing to ever clean it up.
+    // Split from a single shared cleanup() into two directions: only an
+    // agent-initiated hangup can plausibly route the customer into a rating
+    // prompt afterward (bridge.destroy() doesn't hang up member channels —
+    // that's exactly why the explicit agentChannel.hangup() below is still
+    // needed — so the customer leg is left live and controllable). A
+    // customer-initiated hangup means there's nothing left to prompt.
     let cleaned = false;
     const state = { bridge: null, startedAt: null };
-    const cleanup = async (finalStatus = 'completed') => {
+    const teardown = async finalStatus => {
         if (cleaned) return;
         cleaned = true;
         claimedSessions.delete(customerSessionId);
         if (state.bridge) await state.bridge.destroy().catch(() => {});
-        await customerChannel.hangup().catch(() => {});
         await agentChannel.hangup().catch(() => {});
         await setAgentStatus(agentId, 'available');
         await upsertCallLog({
@@ -391,8 +397,22 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         console.log(`📴 Call ended: ${customerSessionId} <-> agent ${agentId} (${finalStatus})`);
     };
 
-    customerChannel.once('StasisEnd', () => cleanup());
-    agentChannel.once('StasisEnd', () => cleanup());
+    customerChannel.once('StasisEnd', async () => {
+        await teardown('completed');
+        await customerChannel.hangup().catch(() => {});
+    });
+
+    agentChannel.once('StasisEnd', async () => {
+        await teardown('completed');
+        const { ratingEnabled, ttsVoice, ttsSpeedScale } = await getIvrConfig();
+        if (ratingEnabled) {
+            await runRatingIvr(customerChannel, customerSessionId, { voiceKey: ttsVoice, speedScale: ttsSpeedScale }).catch(err =>
+                console.error(`❌ Rating IVR error for ${customerSessionId}:`, err.message)
+            );
+        } else {
+            await customerChannel.hangup().catch(() => {});
+        }
+    });
 
     try {
         const bridge = await client.bridges.create({ type: 'mixing' });
@@ -414,10 +434,44 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         // the generic StasisStart catch, leaving the claim held forever,
         // the agent stuck (never reverted to available), and no StasisEnd
         // listener state to fall back on either. Now it's exactly one of
-        // several ways cleanup() can be reached, all idempotent.
+        // several ways teardown() can be reached, all idempotent. The bridge
+        // never really formed, so this always takes the plain-hangup path,
+        // never the rating one.
         console.error(`❌ Error bridging agent ${agentId} to ${customerSessionId}:`, err.message);
-        await cleanup('failed');
+        await teardown('failed');
+        await customerChannel.hangup().catch(() => {});
     }
+}
+
+// Only reached from bridgeAgentLeg's agent-hung-up path, on a customer
+// channel that's still live but no longer bridged to anyone. Reuses the
+// exact "play a prompt, race it against a digit-or-timeout" idiom already
+// proven in runIvrMenu. A digit outside 1-5, a timeout, or the customer
+// hanging up mid-prompt all just skip the rating write and hang up —
+// nothing here can leave the channel stuck.
+async function runRatingIvr(customerChannel, sessionId, voiceOpts) {
+    let customerGone = false;
+    const onGone = () => {
+        customerGone = true;
+    };
+    customerChannel.once('StasisEnd', onGone);
+
+    const digitWait = waitForDigitOrTimeout(customerChannel.id, RATING_TIMEOUT_MS);
+    const digit = await Promise.race([
+        playText(customerChannel, 'Please rate this call from 1 to 5, with 5 being excellent.', voiceOpts)
+            .then(() => null)
+            .catch(() => null),
+        digitWait.promise
+    ]);
+    digitWait.cancel();
+    customerChannel.removeListener('StasisEnd', onGone);
+
+    if (!customerGone && digit && /^[1-5]$/.test(digit)) {
+        await upsertCallLog({ session_id: sessionId, rating: Number(digit) });
+        console.log(`⭐ ${sessionId} rated ${digit}/5`);
+    }
+
+    await customerChannel.hangup().catch(() => {});
 }
 
 // ARI channel names look like "PJSIP/simon-00000123" — the part between the

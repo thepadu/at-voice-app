@@ -10,6 +10,7 @@ type Call = {
     duration: number | null;
     created_at: string;
     agent_name?: string | null;
+    rating?: number | null;
 };
 
 type Ticket = {
@@ -69,6 +70,10 @@ export default function CallDetailsDrawer({ call, onClose }: { call: Call | null
                     <div>
                         <span className="call-details-label">Agent</span>
                         {call.agent_name ?? '—'}
+                    </div>
+                    <div>
+                        <span className="call-details-label">Rating</span>
+                        {call.rating ? '⭐'.repeat(call.rating) : '—'}
                     </div>
                     <div>
                         <span className="call-details-label">Duration</span>

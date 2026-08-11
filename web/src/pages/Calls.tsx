@@ -17,6 +17,7 @@ type Call = {
     called_back?: boolean;
     direction?: 'incoming' | 'outgoing';
     missed?: boolean;
+    rating?: number | null;
 };
 
 type Tab = 'all' | 'incoming' | 'outgoing' | 'missed';

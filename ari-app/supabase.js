@@ -17,14 +17,19 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 async function getIvrConfig() {
     const { data, error } = await supabase
         .from('ivr_config')
-        .select('greeting, tts_voice, tts_speed_scale')
+        .select('greeting, tts_voice, tts_speed_scale, rating_enabled')
         .eq('id', 1)
         .single();
     if (error) {
         console.error('❌ Failed to load ivr_config:', error.message);
-        return { greeting: 'Welcome to Chumz customer support.', ttsVoice: null, ttsSpeedScale: 1.0 };
+        return { greeting: 'Welcome to Chumz customer support.', ttsVoice: null, ttsSpeedScale: 1.0, ratingEnabled: false };
     }
-    return { greeting: data.greeting, ttsVoice: data.tts_voice, ttsSpeedScale: data.tts_speed_scale ?? 1.0 };
+    return {
+        greeting: data.greeting,
+        ttsVoice: data.tts_voice,
+        ttsSpeedScale: data.tts_speed_scale ?? 1.0,
+        ratingEnabled: data.rating_enabled ?? false
+    };
 }
 
 async function getIvrOptions() {

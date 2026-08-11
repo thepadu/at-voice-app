@@ -47,6 +47,7 @@ export default function IvrEditor() {
     const [greeting, setGreeting] = useState('');
     const [ttsVoice, setTtsVoice] = useState<string>('');
     const [ttsSpeedScale, setTtsSpeedScale] = useState(1.0);
+    const [ratingEnabled, setRatingEnabled] = useState(false);
     const [drafts, setDrafts] = useState<Record<string, IvrOption>>({});
     const [addOpen, setAddOpen] = useState(false);
     const [addForm, setAddForm] = useState(EMPTY_FORM);
@@ -57,6 +58,7 @@ export default function IvrEditor() {
         if (greetingData?.greeting !== undefined) setGreeting(greetingData.greeting);
         if (greetingData?.tts_voice !== undefined) setTtsVoice(greetingData.tts_voice ?? '');
         if (greetingData?.tts_speed_scale !== undefined) setTtsSpeedScale(greetingData.tts_speed_scale ?? 1.0);
+        if (greetingData?.rating_enabled !== undefined) setRatingEnabled(!!greetingData.rating_enabled);
     }, [greetingData]);
 
     useEffect(() => {
@@ -71,7 +73,12 @@ export default function IvrEditor() {
         mutationFn: () =>
             apiFetch('/api/ivr-config', {
                 method: 'PATCH',
-                body: JSON.stringify({ greeting, tts_voice: ttsVoice || null, tts_speed_scale: ttsSpeedScale })
+                body: JSON.stringify({
+                    greeting,
+                    tts_voice: ttsVoice || null,
+                    tts_speed_scale: ttsSpeedScale,
+                    rating_enabled: ratingEnabled
+                })
             }),
         onSuccess: () => {
             showToast('Greeting saved');
@@ -83,7 +90,8 @@ export default function IvrEditor() {
     const greetingDirty =
         greeting !== (greetingData?.greeting ?? '') ||
         ttsVoice !== (greetingData?.tts_voice ?? '') ||
-        ttsSpeedScale !== (greetingData?.tts_speed_scale ?? 1.0);
+        ttsSpeedScale !== (greetingData?.tts_speed_scale ?? 1.0) ||
+        ratingEnabled !== !!greetingData?.rating_enabled;
 
     const saveOption = useMutation({
         mutationFn: (digit: string) => {
@@ -173,6 +181,25 @@ export default function IvrEditor() {
                     <p className="hint">
                         Length scale, not playback speed — higher plays slower with the same natural cadence.
                         {ttsVoice === 'man' && ' The "man" voice needs a second voice model installed on the server to sound different from the default.'}
+                    </p>
+
+                    <div className="panel-header" style={{ marginTop: 16 }}>
+                        <label htmlFor="rating-toggle" style={{ margin: 0 }}>
+                            Ask callers to rate the call
+                        </label>
+                        <label className="toggle-switch">
+                            <input
+                                id="rating-toggle"
+                                type="checkbox"
+                                checked={ratingEnabled}
+                                onChange={e => setRatingEnabled(e.target.checked)}
+                            />
+                            <span className="toggle-track"><span className="toggle-knob" /></span>
+                        </label>
+                    </div>
+                    <p className="hint">
+                        After the agent hangs up, the caller hears a 1-5 rating prompt before the line
+                        disconnects. Off by default — changes live call flow.
                     </p>
 
                     <div className="modal-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }}>
