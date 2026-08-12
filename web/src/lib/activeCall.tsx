@@ -2,7 +2,12 @@ import { createContext, useContext, useEffect, useRef, useState, ReactNode } fro
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
 
-type Call = { session_id: string; caller: string; created_at: string };
+type Call = {
+    session_id: string;
+    caller: string;
+    created_at: string;
+    add_party_status?: 'requested' | 'dialing' | 'connected' | 'left' | 'failed' | null;
+};
 
 const ActiveCallContext = createContext<{
     activeCall: Call | null;

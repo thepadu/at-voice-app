@@ -28,6 +28,8 @@ const {
     getAgentBySipUsername,
     getNoAgentsForwardingDestination,
     getBusinessHours,
+    claimAddPartyRequests,
+    setAddPartyStatus,
     markMissedIfAbandoned,
     reconcileStaleCallsOnStartup,
     reconcileStaleAgentsOnStartup,
@@ -41,6 +43,7 @@ const APP_NAME = process.env.ARI_APP_NAME || 'chumz-ivr';
 const MENU_TIMEOUT_MS = 15000;
 const RATING_TIMEOUT_MS = 8000;
 const QUEUE_POLL_MS = 3000;
+const ADD_PARTY_POLL_MS = 3000;
 const GHOST_AGENT_POLL_MS = 30000;
 const HOLDING_BRIDGE_NAME = 'support-queue';
 // AT's trunk rules explicitly prohibit masking outbound caller ID — every
@@ -59,6 +62,8 @@ const agentLegBySessionId = new Map(); // agent leg channel id -> { channel: cus
 const ringGroupBySessionId = new Map(); // customer sessionId -> [{ channel: agentChannel, agentId }, ...]
 const claimedSessions = new Set(); // customer sessionIds already won by an agent — guards the simultaneous-answer race
 const outboundBySessionId = new Map(); // agent-originated sessionId -> { agentChannel, destChannel, bridge, bridged, cleaned, answeredAt }
+const activeBridgeBySessionId = new Map(); // customer sessionId -> the live agent<->customer mixing bridge, for add-a-party
+const partyChannelsBySessionId = new Map(); // customer sessionId -> Set of extra channels added (or still dialing) via add-a-party
 
 let client;
 let holdingBridge;
@@ -386,8 +391,16 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         if (cleaned) return;
         cleaned = true;
         claimedSessions.delete(customerSessionId);
+        activeBridgeBySessionId.delete(customerSessionId);
+        // Every party added via add-a-party, including one still ringing and
+        // not yet actually in the bridge — otherwise a channel mid-dial when
+        // the original call ends is never hung up here, only whenever
+        // Asterisk's own dial timeout eventually gives up on it.
+        const partyChannels = partyChannelsBySessionId.get(customerSessionId);
+        partyChannelsBySessionId.delete(customerSessionId);
         if (state.bridge) await state.bridge.destroy().catch(() => {});
         await agentChannel.hangup().catch(() => {});
+        if (partyChannels) await Promise.all([...partyChannels].map(ch => ch.hangup().catch(() => {})));
         await setAgentStatus(agentId, 'available');
         await upsertCallLog({
             session_id: customerSessionId,
@@ -417,6 +430,7 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
     try {
         const bridge = await client.bridges.create({ type: 'mixing' });
         state.bridge = bridge;
+        activeBridgeBySessionId.set(customerSessionId, bridge);
         await holdingBridge.removeChannel({ channel: customerChannel.id }).catch(() => {});
         await bridge.addChannel({ channel: [customerChannel.id, agentChannel.id] });
 
@@ -681,6 +695,107 @@ async function finishOutboundCall(sessionId, status) {
     console.log(`📴 Outbound call ended: ${sessionId} (${status})`);
 }
 
+// Blind-add-a-party MVP: at-voice-app has no direct line into a live call —
+// this process is the only thing that can touch a real bridge — so a
+// supervisor/agent request lands as two columns on the call's own
+// call_logs row (set by POST /api/calls/active/add-party) and this poll
+// picks it up. Same guarded-interval shape as tryDequeueNext.
+let addPartyPollInFlight = false;
+
+async function tryAddPartyPoll() {
+    if (addPartyPollInFlight) return;
+    addPartyPollInFlight = true;
+    try {
+        const requests = await claimAddPartyRequests();
+        await Promise.all(requests.map(req => originateAddPartyLeg(req.session_id, req.add_party_destination)));
+    } finally {
+        addPartyPollInFlight = false;
+    }
+}
+
+// Dials the new party exactly like handleOutboundAgentCall dials its real
+// destination leg — same trunk, same endpoint shape — but this leg is never
+// bridged to a fresh agent channel; bridgeAddPartyDest below merges it
+// straight into the existing agent<->customer bridge once it answers.
+async function originateAddPartyLeg(customerSessionId, destination) {
+    if (!activeBridgeBySessionId.has(customerSessionId)) {
+        // The original call already ended (or was never actually bridged)
+        // by the time this request was claimed — nothing to add to.
+        await setAddPartyStatus(customerSessionId, 'failed');
+        return;
+    }
+
+    try {
+        await client.channels.originate({
+            endpoint: `PJSIP/${destination}@at-trunk`,
+            app: APP_NAME,
+            appArgs: `add-party-dest:${customerSessionId}`,
+            callerId: OUTBOUND_CALLER_ID,
+            timeout: 30
+        });
+    } catch (err) {
+        console.error(`❌ Failed to originate add-party leg to ${destination} for ${customerSessionId}:`, err.message);
+        await setAddPartyStatus(customerSessionId, 'failed');
+    }
+}
+
+// The new party's channel enters Stasis the same way an outbound-dest leg
+// does (see bridgeOutboundDest) — it may already be 'Up' by the time we get
+// control, or still genuinely ringing. Tracked in partyChannelsBySessionId
+// from the moment it enters Stasis (not just once answered) so a hangup —
+// either this channel's own or the original call ending first — can never
+// orphan it mid-dial.
+async function bridgeAddPartyDest(destChannel, customerSessionId) {
+    const partyChannels = partyChannelsBySessionId.get(customerSessionId) || new Set();
+    partyChannels.add(destChannel);
+    partyChannelsBySessionId.set(customerSessionId, partyChannels);
+
+    let bridged = false;
+    const onStateChange = (event, updatedChannel) => {
+        if (updatedChannel.state !== 'Up') return;
+        destChannel.removeListener('ChannelStateChange', onStateChange);
+        bridged = true;
+        completeAddParty(destChannel, customerSessionId).catch(err =>
+            console.error(`❌ Error completing add-party for ${customerSessionId}:`, err.message)
+        );
+    };
+    destChannel.on('ChannelStateChange', onStateChange);
+
+    destChannel.once('StasisEnd', () => {
+        destChannel.removeListener('ChannelStateChange', onStateChange);
+        partyChannels.delete(destChannel);
+        // If the original call already ended, this StasisEnd is just the
+        // bridge's own teardown hanging this channel up too — leave
+        // add_party_status alone (teardown doesn't touch it, and the row
+        // itself is about to go to a terminal status anyway). Only report
+        // in when the original call is still live: 'failed' if it never
+        // got bridged (no answer / dial error), 'left' if it did and then
+        // hung up on its own.
+        if (activeBridgeBySessionId.has(customerSessionId)) {
+            setAddPartyStatus(customerSessionId, bridged ? 'left' : 'failed').catch(() => {});
+        }
+    });
+
+    if (destChannel.state === 'Up') {
+        destChannel.removeListener('ChannelStateChange', onStateChange);
+        bridged = true;
+        await completeAddParty(destChannel, customerSessionId);
+    }
+}
+
+async function completeAddParty(destChannel, customerSessionId) {
+    const bridge = activeBridgeBySessionId.get(customerSessionId);
+    if (!bridge) {
+        // Original call ended while this leg was still ringing.
+        await destChannel.hangup().catch(() => {});
+        return;
+    }
+
+    await bridge.addChannel({ channel: destChannel.id });
+    await setAddPartyStatus(customerSessionId, 'connected');
+    console.log(`➕ Added party to call ${customerSessionId}`);
+}
+
 async function main() {
     client = await ari.connect(ARI_URL, ARI_USERNAME, ARI_PASSWORD);
 
@@ -707,6 +822,14 @@ async function main() {
             const sessionId = args[0].slice('outbound-dest:'.length);
             bridgeOutboundDest(channel, sessionId).catch(err =>
                 console.error('❌ Error handling outbound destination leg:', err.message)
+            );
+            return;
+        }
+
+        if (args[0] && args[0].startsWith('add-party-dest:')) {
+            const customerSessionId = args[0].slice('add-party-dest:'.length);
+            bridgeAddPartyDest(channel, customerSessionId).catch(err =>
+                console.error('❌ Error handling add-party destination leg:', err.message)
             );
             return;
         }
@@ -764,6 +887,7 @@ async function main() {
 
     client.start(APP_NAME);
     setInterval(() => tryDequeueNext().catch(err => console.error('❌ Queue poll error:', err.message)), QUEUE_POLL_MS);
+    setInterval(() => tryAddPartyPoll().catch(err => console.error('❌ Add-party poll error:', err.message)), ADD_PARTY_POLL_MS);
 
     // "Ghost agents" — status says available/ringing but the browser
     // heartbeat behind it has gone stale (or never existed at all, e.g. a

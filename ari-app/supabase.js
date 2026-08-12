@@ -103,6 +103,30 @@ async function getNoAgentsForwardingDestination() {
     return rule?.destination ?? null;
 }
 
+// Atomic claim: the UPDATE's own WHERE clause is what prevents a row being
+// claimed twice — Postgres commits one request's WHERE add_party_status =
+// 'requested' before the next can match it, so overlapping poll ticks (or a
+// slow one still in flight when the next fires) can't both originate a leg
+// for the same request. Mirrors reconcileStaleCallsOnStartup's same
+// update-and-select-in-one-call pattern.
+async function claimAddPartyRequests() {
+    const { data, error } = await supabase
+        .from('call_logs')
+        .update({ add_party_status: 'dialing' })
+        .eq('add_party_status', 'requested')
+        .select('session_id, add_party_destination');
+    if (error) {
+        console.error('❌ Failed to claim add-party requests:', error.message);
+        return [];
+    }
+    return data ?? [];
+}
+
+async function setAddPartyStatus(sessionId, status) {
+    const { error } = await supabase.from('call_logs').update({ add_party_status: status }).eq('session_id', sessionId);
+    if (error) console.error('❌ Failed to update add-party status:', error.message);
+}
+
 // Fails safe: if the table doesn't exist yet (migration not applied) or the
 // query errors for any other reason, treat hours as "not enforced" rather
 // than risk blocking every inbound call on a config problem.
@@ -224,6 +248,8 @@ module.exports = {
     getAgentBySipUsername,
     getNoAgentsForwardingDestination,
     getBusinessHours,
+    claimAddPartyRequests,
+    setAddPartyStatus,
     markMissedIfAbandoned,
     reconcileStaleCallsOnStartup,
     reconcileStaleAgentsOnStartup,

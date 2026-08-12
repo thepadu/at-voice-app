@@ -537,6 +537,56 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         res.json({ call: call ?? null, agentStatus: agent.status });
     });
 
+    // Blind-add-a-party MVP: ari-app has no HTTP server of its own, so these
+    // two columns on the agent's own ongoing call_logs row are the only way
+    // to signal a live call in progress — ari-app's poll loop claims
+    // add_party_status='requested' rows and originates the new leg itself.
+    // `GET /api/agents/me/active-call` above already returns these columns
+    // for free (it selects '*'), so the frontend can poll status with zero
+    // extra endpoint work.
+    app.post('/api/calls/active/add-party', requireAuth, async (req, res) => {
+        const { destination } = req.body;
+        if (!destination || !destination.trim()) {
+            return res.status(400).json({ error: 'Destination is required' });
+        }
+
+        const agentQuery = req.user.agentId
+            ? supabase.from('agents').select('phone').eq('id', req.user.agentId)
+            : supabase.from('agents').select('phone').ilike('email', req.user.email);
+        const { data: agent } = await agentQuery.maybeSingle();
+        if (!agent) {
+            return res.status(404).json({ error: 'Agent not found' });
+        }
+
+        const { data: call } = await supabase
+            .from('call_logs')
+            .select('session_id, add_party_status')
+            .eq('agent_number', agent.phone)
+            .eq('status', 'ongoing')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (!call) {
+            return res.status(400).json({ error: 'No active call' });
+        }
+        if (['requested', 'dialing'].includes(call.add_party_status)) {
+            return res.status(409).json({ error: 'Already adding a party to this call' });
+        }
+
+        const { error } = await supabase
+            .from('call_logs')
+            .update({ add_party_destination: destination.trim(), add_party_status: 'requested' })
+            .eq('session_id', call.session_id);
+
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: 'Failed to request add-party' });
+        }
+
+        res.json({ ok: true });
+    });
+
     // Lets the React app register as a real WebRTC softphone (SIP.js) —
     // credentials are provisioned server-side in agent_sip_credentials, kept
     // in its own table (not columns on `agents`) since they're a more
