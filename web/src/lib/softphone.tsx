@@ -187,6 +187,21 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 reconnectionDelay: 4,
                 authorizationUsername: creds.username,
                 authorizationPassword: creds.password,
+                // Without this, the browser's own ICE gathering had zero
+                // NAT-traversal help — not even STUN — and relied entirely
+                // on a direct host-candidate path succeeding. Any agent on
+                // a symmetric NAT or a restrictive mobile/corporate network
+                // would silently get one-way or no audio with nothing to
+                // fall back to. The TURN server also answers plain STUN
+                // binding requests, so one entry covers both.
+                sessionDescriptionHandlerFactoryOptions: {
+                    peerConnectionConfiguration: {
+                        iceServers: [
+                            { urls: creds.turnUrl.replace('turn:', 'stun:') },
+                            { urls: creds.turnUrl, username: creds.turnUsername, credential: creds.turnPassword }
+                        ]
+                    }
+                },
                 delegate: {
                     onConnect: () => {
                         if (!everConnected) {

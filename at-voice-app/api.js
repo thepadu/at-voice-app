@@ -126,9 +126,16 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // call_logs grows enough that a 2000-row fetch itself becomes the
     // bottleneck (see SYSTEM_DESIGN.md).
     app.get('/api/calls', requireAuth, async (req, res) => {
-        const { tab, from, to, option, status, ticket, caller } = req.query;
+        const { tab, to, option, status, ticket, caller } = req.query;
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
+
+        // Caps the common case (no explicit range = "recent activity") so
+        // this doesn't keep fetching more rows every day forever as
+        // call_logs grows — a caller who explicitly asks for a wider range
+        // still gets exactly that, unchanged.
+        const DEFAULT_WINDOW_DAYS = 30;
+        const from = req.query.from || new Date(Date.now() - DEFAULT_WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
 
         let query = supabase
             .from('call_logs')
@@ -136,7 +143,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             .order('created_at', { ascending: false })
             .limit(2000);
 
-        if (from) query = query.gte('created_at', `${from}T00:00:00`);
+        query = query.gte('created_at', `${from}T00:00:00`);
         if (to) query = query.lte('created_at', `${to}T23:59:59`);
         if (option) query = query.eq('option_pressed', option);
         if (status) query = query.eq('status', status);
@@ -620,7 +627,18 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             username: creds.sip_username,
             password: creds.sip_password,
             domain: process.env.SOFTPHONE_SIP_DOMAIN || 'sip.chumz.online',
-            wssUrl: process.env.SOFTPHONE_WSS_URL || 'wss://sip.chumz.online:8089/ws'
+            wssUrl: process.env.SOFTPHONE_WSS_URL || 'wss://sip.chumz.online:8089/ws',
+            // TURN relay for agents on networks where a direct/STUN-only ICE
+            // path fails (symmetric NAT, restrictive mobile/corporate
+            // firewalls) — without this the browser had no NAT-traversal
+            // fallback at all. Fallback values match what's actually
+            // provisioned on the VPS today; override via env vars once set
+            // on Render so this real (low-sensitivity — a TURN credential
+            // only allows relaying traffic, nothing account-level) secret
+            // isn't the one actually in use long-term.
+            turnUrl: process.env.SOFTPHONE_TURN_URL || 'turn:64.227.160.38:3478',
+            turnUsername: process.env.SOFTPHONE_TURN_USERNAME || 'chumzagent',
+            turnPassword: process.env.SOFTPHONE_TURN_PASSWORD || 'Ib5Ntu84xtEkJTZdmUX95oDbZcq1uYT5'
         });
     });
 
