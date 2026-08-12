@@ -102,7 +102,7 @@ export default function Analytics() {
                     <p>{summary ? summary.total - summary.outbound : '—'}</p>
                 </div>
                 <div className="card">
-                    <div className="card-label">Outbound</div>
+                    <div className="card-label">Outgoing</div>
                     <p>{summary?.outbound ?? '—'}</p>
                 </div>
                 <div className="card">

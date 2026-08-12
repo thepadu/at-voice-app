@@ -151,6 +151,40 @@ function BusinessHoursPanel() {
     );
 }
 
+function CallRatingPanel() {
+    const queryClient = useQueryClient();
+    const showToast = useToast();
+
+    const { data } = useQuery({ queryKey: ['ivr-config'], queryFn: () => apiFetch('/api/ivr-config') });
+
+    const toggle = useMutation({
+        mutationFn: (rating_enabled: boolean) =>
+            apiFetch('/api/ivr-config', { method: 'PATCH', body: JSON.stringify({ rating_enabled }) }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ivr-config'] }),
+        onError: (err: unknown) => showToast(errorMessage(err), 'error')
+    });
+
+    return (
+        <div className="panel panel-header">
+            <div>
+                <h3 style={{ marginBottom: 2 }}>Call rating</h3>
+                <p className="hint" style={{ marginBottom: 0 }}>
+                    After the agent hangs up, the caller hears a 1-5 rating prompt before the line
+                    disconnects. Off by default — changes live call flow.
+                </p>
+            </div>
+            <label className="toggle-switch">
+                <input
+                    type="checkbox"
+                    checked={!!data?.rating_enabled}
+                    onChange={e => toggle.mutate(e.target.checked)}
+                />
+                <span className="toggle-track"><span className="toggle-knob" /></span>
+            </label>
+        </div>
+    );
+}
+
 export default function CallForwarding() {
     const queryClient = useQueryClient();
     const showToast = useToast();
@@ -251,6 +285,8 @@ export default function CallForwarding() {
                 onConfirm={() => pendingDelete && deleteRule.mutate(pendingDelete.id)}
                 onCancel={() => setPendingDelete(null)}
             />
+
+            <CallRatingPanel />
         </div>
     );
 }

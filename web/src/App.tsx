@@ -45,6 +45,7 @@ function AppRoutes() {
                 <Route path="/queue" element={<LiveQueue />} />
                 <Route path="/calls" element={<Calls />} />
                 <Route path="/outbound" element={<Navigate to="/calls" replace />} />
+                <Route path="/forwarding" element={<Navigate to="/settings" replace />} />
                 <Route path="/tickets" element={<Tickets />} />
                 <Route
                     path="/analytics"
@@ -71,7 +72,7 @@ function AppRoutes() {
                     }
                 />
                 <Route
-                    path="/forwarding"
+                    path="/settings"
                     element={
                         <RequireSupervisor>
                             <CallForwarding />

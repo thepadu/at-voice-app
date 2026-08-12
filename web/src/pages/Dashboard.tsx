@@ -96,7 +96,7 @@ export default function Dashboard() {
                     </div>
                 </div>
                 <div className="card">
-                    <div className="card-label">Outbound</div>
+                    <div className="card-label">Outgoing</div>
                     <p>{summary?.outbound ?? '—'}</p>
                 </div>
                 <div className="card">
@@ -132,7 +132,7 @@ export default function Dashboard() {
                             {live.slice(0, LIVE_NOW_LIMIT).map(call => (
                                 <tr key={call.session_id} className="live-row">
                                     <td>{call.caller}</td>
-                                    <td>{call.direction === 'Outbound' ? '↗ Outbound' : '↙ Inbound'}</td>
+                                    <td>{call.direction === 'Outbound' ? '↗ Outgoing' : '↙ Inbound'}</td>
                                     <td>
                                         <StatusPill value={call.status ?? 'unknown'} />
                                     </td>

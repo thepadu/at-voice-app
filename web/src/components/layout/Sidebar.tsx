@@ -60,8 +60,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                         <NavLink to="/ivr" className="sidebar-link">
                             IVR Builder
                         </NavLink>
-                        <NavLink to="/forwarding" className="sidebar-link">
-                            Call Forwarding
+                        <NavLink to="/settings" className="sidebar-link">
+                            Settings
                         </NavLink>
                     </>
                 )}

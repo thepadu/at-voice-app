@@ -12,7 +12,7 @@ const TITLES: Record<string, string> = {
     '/analytics': 'Analytics',
     '/agents': 'Agents',
     '/ivr': 'IVR Builder',
-    '/forwarding': 'Call Forwarding'
+    '/settings': 'Settings'
 };
 
 export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {

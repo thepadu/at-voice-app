@@ -732,7 +732,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     app.patch('/api/ivr-config', requireSupervisor, async (req, res) => {
         const { greeting, tts_voice, tts_speed_scale, rating_enabled } = req.body;
 
-        if (!greeting || !greeting.trim()) {
+        if (greeting !== undefined && !greeting.trim()) {
             return res.status(400).json({ error: 'Greeting cannot be empty' });
         }
         if (tts_voice !== undefined && !IVR_VOICES.includes(tts_voice)) {
@@ -742,7 +742,8 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Speed must be between 0.5 and 2.0' });
         }
 
-        const updates = { greeting: greeting.trim(), updated_at: new Date().toISOString() };
+        const updates = { updated_at: new Date().toISOString() };
+        if (greeting !== undefined) updates.greeting = greeting.trim();
         if (tts_voice !== undefined) updates.tts_voice = tts_voice;
         if (tts_speed_scale !== undefined) updates.tts_speed_scale = tts_speed_scale;
         if (rating_enabled !== undefined) updates.rating_enabled = !!rating_enabled;

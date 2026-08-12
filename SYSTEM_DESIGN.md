@@ -111,17 +111,17 @@ An agent with **no** row in `agent_sip_credentials` falls back, when going "avai
 
 Vite + React + TypeScript + React Router + TanStack Query. ESLint + Prettier + Vitest are set up and passing.
 
-**Layout**: sidebar (role-aware — Analytics/Agents/IVR Builder/Call Forwarding only render for supervisors) + topbar (search, live-agent-count badge, self-service status control, dark-mode toggle) + a real active-call status bar.
+**Layout**: sidebar (role-aware — Analytics/Agents/IVR Builder/Settings only render for supervisors) + topbar (search, live-agent-count badge, self-service status control, dark-mode toggle) + a real active-call status bar.
 
 **Pages**:
 - `/` Dashboard — KPI cards, calls-by-hour chart, a capped "Live Now" panel, supervisor top-agents teaser (links to Analytics) or an individual agent's own performance.
 - `/queue` Live Queue — who's actually on hold right now, with SLA row coloring.
-- `/calls` Calls — Incoming / Outbound / Missed tabs, date-range + caller-number filters, pagination. Missed-call rows show whether they've already been called back (derived from later outbound call history, not a separate tracked flag) and let an agent call back with one click.
+- `/calls` Calls — Incoming / Outgoing / Missed tabs, date-range + caller-number filters, pagination. Missed-call rows show whether they've already been called back (derived from later outgoing call history, not a separate tracked flag) and let an agent call back with one click.
 - `/tickets` Tags & Tickets — recent calls, the tickets table, a creation panel.
 - `/analytics` Analytics (supervisors only) — today's totals, missed-call breakdown by reason, calls-by-hour, full agent performance leaderboard.
 - `/agents` Agents (supervisors only) — roster grid with name/phone search, self-service status control reused here for supervisor overrides.
 - `/ivr` IVR Builder (supervisors only) — editable greeting + per-digit menu with a live call-flow preview.
-- `/forwarding` Call Forwarding (supervisors only) — Business Hours panel (open/close time, active days, after-hours message) plus the forwarding rules editor.
+- `/settings` Settings (supervisors only) — Business Hours panel (open/close time, active days, after-hours message), the forwarding rules editor, and the post-call rating toggle.
 
 **Softphone** (`lib/softphone.tsx`): a real SIP.js WebRTC client that registers directly to Asterisk over WSS. Handles incoming/outgoing/active call state, a keepalive ping + automatic reconnection with re-registration for the transport (an idle tab's connection getting silently dropped by a proxy/NAT used to mean a softphone that never recovered without a manual page refresh), the presence heartbeat, and a guard against placing a second call while one is already active or ringing.
 

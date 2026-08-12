@@ -24,13 +24,13 @@ type Tab = 'all' | 'incoming' | 'outgoing' | 'missed';
 const TABS: { value: Tab; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'incoming', label: 'Incoming' },
-    { value: 'outgoing', label: 'Outbound' },
+    { value: 'outgoing', label: 'Outgoing' },
     { value: 'missed', label: 'Missed' }
 ];
 
 function DirectionIcon({ call }: { call: Call }) {
     if (call.missed) return <PhoneMissed size={16} className="direction-icon direction-icon-missed" aria-label="Missed" />;
-    if (call.direction === 'outgoing') return <PhoneOutgoing size={16} className="direction-icon direction-icon-outgoing" aria-label="Outbound" />;
+    if (call.direction === 'outgoing') return <PhoneOutgoing size={16} className="direction-icon direction-icon-outgoing" aria-label="Outgoing" />;
     return <PhoneIncoming size={16} className="direction-icon direction-icon-incoming" aria-label="Incoming" />;
 }
 
@@ -227,7 +227,7 @@ export default function Calls() {
                         </thead>
                         <tbody>
                             {calls.length === 0 && (
-                                <tr><td colSpan={7} className="empty">No outbound calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
+                                <tr><td colSpan={7} className="empty">No outgoing calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
                             )}
                             {calls.map(call => (
                                 <tr key={call.session_id}>
