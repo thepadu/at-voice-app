@@ -1282,252 +1282,192 @@ textarea {
     margin-top: 14px;
 }
 
-/* ── Active-call status bar ───────────────────────────────────────── */
+/* ── Call screen ──────────────────────────────────────────────────── */
+/* One unified card for all three call phases (incoming/outgoing/active),
+   Android-style — fixed near the top center of the viewport, sized to feel
+   like a real takeover rather than a thin bar, but deliberately NOT a
+   blocking modal (no backdrop): an agent still needs to reach the rest of
+   the dashboard — customer lookups, tickets — while on a call. Layout.tsx
+   separately dims the sidebar/topbar for focus instead of disabling them. */
 
-/* Sticky (not just flow-positioned) and visually heavier than an ordinary
-   bar — a call in progress is the most important thing happening, so it
-   should stay on screen and read as such even while the agent scrolls or
-   works elsewhere in the page. Sits below the incoming/outgoing banners
-   (z-index 800) but above ordinary page content. */
-.status-bar {
-    position: sticky;
-    top: 0;
-    z-index: 500;
-    flex-shrink: 0;
-    background: var(--brand-dark);
-    color: #fff;
+.call-screen {
+    position: fixed;
+    top: 96px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 950;
+    width: 380px;
+    max-width: calc(100vw - 32px);
+    background: var(--surface);
+    border-radius: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+    padding: 28px 24px;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    padding: 14px 28px;
-    font-size: 15px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    text-align: center;
+    gap: 4px;
+    animation: call-screen-drop-in 0.25s ease-out;
 }
 
-.status-bar-info {
+@keyframes call-screen-drop-in {
+    from { opacity: 0; transform: translate(-50%, -12px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* Extra-insistent variant for when the ringtone couldn't autoplay (no user
+   gesture yet this session) — a pulsing glow stands in for the missing
+   sound cue. */
+.call-screen-pulse {
+    animation: call-screen-drop-in 0.25s ease-out, call-screen-glow 0.9s ease-in-out infinite;
+}
+
+@keyframes call-screen-glow {
+    0%, 100% { box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), 0 0 0 0 rgba(243, 156, 18, 0.5); }
+    50% { box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), 0 0 0 14px rgba(243, 156, 18, 0); }
+}
+
+.call-screen-avatar-wrap {
+    position: relative;
+    width: 88px;
+    height: 88px;
+    margin-bottom: 12px;
+}
+
+.call-screen-avatar {
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
-    gap: 12px;
+    justify-content: center;
+    color: #fff;
+}
+
+.call-screen-incoming .call-screen-avatar {
+    background: linear-gradient(135deg, #FF9800, #F39C12);
+}
+
+.call-screen-outgoing .call-screen-avatar,
+.call-screen-active .call-screen-avatar {
+    background: linear-gradient(135deg, #17A697, #2C3E50);
+}
+
+.call-screen-ripple {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 3px solid #F39C12;
+    animation: call-screen-ripple 1.4s ease-out infinite;
+}
+
+@keyframes call-screen-ripple {
+    0% { transform: scale(1); opacity: 0.6; }
+    100% { transform: scale(1.5); opacity: 0; }
+}
+
+.call-screen-number {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+.call-screen-status {
+    font-size: 14px;
+    color: var(--secondary);
+    margin-bottom: 14px;
+}
+
+.call-screen-add-party-status {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--brand);
+    margin-bottom: 10px;
+}
+
+.call-screen-add-party-failed {
+    color: var(--danger);
+}
+
+.call-screen-add-party-input {
+    width: 100%;
+    margin-bottom: 14px;
+    text-align: center;
+}
+
+.call-screen-primary-actions {
+    display: flex;
+    gap: 32px;
+    margin-top: 8px;
+}
+
+.call-screen-round-btn {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.call-screen-btn-answer {
+    background: var(--brand);
+}
+
+.call-screen-btn-reject,
+.call-screen-btn-end {
+    background: var(--danger);
+}
+
+.call-screen-controls-grid {
+    display: flex;
+    gap: 8px;
+    margin: 6px 0 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.call-screen-control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 68px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px 4px;
+    border-radius: 12px;
+    color: var(--ink);
+    font-size: 11px;
     font-weight: 600;
 }
 
-.status-bar-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--brand-bright);
-    animation: pulse-dot 1.5s infinite;
+.call-screen-control:hover {
+    background: var(--page-bg);
 }
 
-/* The rest of the shell visually steps back the instant a call starts
-   (see Layout.tsx) — dimmed, not disabled, since an agent still
+.call-screen-control:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.call-screen-control-active {
+    color: var(--brand);
+}
+
+/* The rest of the shell visually steps back the instant any call state
+   starts (see Layout.tsx) — dimmed, not disabled, since an agent still
    legitimately needs to navigate or open a ticket mid-call. */
 .app-shell-on-call .sidebar,
 .app-shell-on-call .topbar {
     opacity: 0.6;
     transition: opacity 0.2s ease;
-}
-
-@keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
-}
-
-.status-bar-timer {
-    background: rgba(255, 255, 255, 0.15);
-    padding: 3px 12px;
-    border-radius: 20px;
-    font-weight: 700;
-}
-
-.status-bar-add-party {
-    background: rgba(255, 255, 255, 0.15);
-    padding: 3px 12px;
-    border-radius: 20px;
-    font-weight: 600;
-    font-size: 13px;
-}
-
-.status-bar-add-party-failed {
-    background: var(--danger);
-}
-
-.status-bar-add-party-input {
-    background: rgba(255, 255, 255, 0.15);
-    border: none;
-    border-radius: 20px;
-    padding: 7px 14px;
-    color: #fff;
-    font-size: 13px;
-    width: 160px;
-}
-
-.status-bar-add-party-input::placeholder {
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.status-bar-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.status-bar-ticket-btn {
-    background: #fff;
-    color: var(--brand-dark);
-    padding: 7px 16px;
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.status-bar-control-btn {
-    background: rgba(255, 255, 255, 0.15);
-    color: #fff;
-    padding: 7px 16px;
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.status-bar-control-active {
-    background: #fff;
-    color: var(--brand-dark);
-}
-
-.status-bar-end-btn {
-    background: var(--danger);
-    color: #fff;
-    padding: 7px 16px;
-    font-size: 13px;
-    font-weight: 700;
-}
-
-/* ── Incoming call banner ─────────────────────────────────────────── */
-/* Fixed to the viewport (not a flex child of .app-shell, which is why an
-   earlier version rendered as a squeezed sliver between the sidebar and
-   content instead of a real banner) — stays visible regardless of scroll
-   position or which page the agent is on. Deliberately NOT brand-dark navy
-   (that's .status-bar's "already on a call" color) — Moneto's warning/gold
-   oranges read as "needs attention now" and won't be mistaken for the
-   routine in-call bar. */
-
-.incoming-call-banner {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 800;
-    background: linear-gradient(135deg, #FF9800, #F39C12);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 28px;
-    padding: 16px 28px;
-    font-size: 15px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-    animation: incoming-call-drop-in 0.25s ease-out, incoming-call-glow 1.4s ease-in-out infinite;
-}
-
-@keyframes incoming-call-drop-in {
-    from { transform: translateY(-100%); }
-    to { transform: translateY(0); }
-}
-
-@keyframes incoming-call-glow {
-    0%, 100% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 0 rgba(255, 152, 0, 0.6); }
-    50% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 8px rgba(255, 152, 0, 0); }
-}
-
-/* Extra-insistent variant for when the ringtone couldn't autoplay (no user
-   gesture yet this session) — a faster, more pronounced pulse stands in for
-   the missing sound cue. */
-.incoming-call-banner-pulse {
-    animation: incoming-call-drop-in 0.25s ease-out, incoming-call-glow 0.7s ease-in-out infinite;
-}
-
-.incoming-call-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-weight: 600;
-}
-
-.incoming-call-icon {
-    font-size: 20px;
-    animation: incoming-call-ring 0.8s ease-in-out infinite;
-}
-
-@keyframes incoming-call-ring {
-    0%, 100% { transform: rotate(0deg); }
-    25% { transform: rotate(-15deg); }
-    75% { transform: rotate(15deg); }
-}
-
-.incoming-call-actions {
-    display: flex;
-    gap: 8px;
-}
-
-.incoming-call-answer {
-    background: #fff;
-    color: #F39C12;
-    padding: 8px 22px;
-    font-weight: 700;
-}
-
-.incoming-call-reject {
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    color: #fff;
-    padding: 8px 22px;
-}
-
-/* ── Outgoing call banner ─────────────────────────────────────────── */
-/* Same fixed-to-viewport treatment as the incoming banner, but the app's own
-   teal brand identity rather than an urgent color — the agent chose to place
-   this call, so it shouldn't compete for attention the way an unprompted
-   incoming ring does. */
-
-.outgoing-call-banner {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 800;
-    background: linear-gradient(135deg, #17A697, #2C3E50);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 28px;
-    padding: 16px 28px;
-    font-size: 15px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-    animation: incoming-call-drop-in 0.25s ease-out;
-}
-
-.outgoing-call-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-weight: 600;
-}
-
-.outgoing-call-icon {
-    font-size: 20px;
-    animation: outgoing-call-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes outgoing-call-pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.55; transform: scale(1.15); }
-}
-
-.outgoing-call-cancel {
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    color: #fff;
-    padding: 8px 22px;
 }
 
 /* ── Wrap-up modal ─────────────────────────────────────────────────── */
@@ -1681,19 +1621,10 @@ textarea {
         padding: 20px;
     }
 
-    .incoming-call-banner,
-    .outgoing-call-banner {
-        flex-wrap: wrap;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 14px 16px;
-        padding-top: calc(14px + env(safe-area-inset-top));
-    }
-
-    .status-bar {
-        flex-wrap: wrap;
-        gap: 8px;
-        padding: 10px 16px;
+    .call-screen {
+        top: calc(72px + env(safe-area-inset-top));
+        width: calc(100vw - 24px);
+        padding: 22px 18px;
     }
 
     /* Stacked in one right-aligned column instead of side-by-side, so

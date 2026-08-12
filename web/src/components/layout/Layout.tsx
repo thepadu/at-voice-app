@@ -1,9 +1,7 @@
 import { ReactNode, useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
-import StatusBar from '../widgets/StatusBar';
-import IncomingCallBanner from '../widgets/IncomingCallBanner';
-import OutgoingCallBanner from '../widgets/OutgoingCallBanner';
+import CallScreen from '../widgets/CallScreen';
 import WrapUpModal from '../widgets/WrapUpModal';
 import QuickTicketModal from '../widgets/QuickTicketModal';
 import FloatingDialer from '../widgets/FloatingDialer';
@@ -21,23 +19,21 @@ export default function Layout({ children }: { children: ReactNode }) {
     // conditionally render it, since the CSS ignores it above the breakpoint.
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
-    // Same caller-truthiness StatusBar itself renders on (SIP.js's live
-    // session first, falling back to the 5s poll) — a call is the most
-    // important thing happening, so the rest of the shell visually steps
-    // back the instant one starts, not up to 5s later.
+    // Same phase logic CallScreen itself renders on — any call state
+    // (ringing, dialing, or active) is the most important thing happening,
+    // so the rest of the shell visually steps back for all three, not just
+    // once a call is fully connected.
+    const { incomingCall, outgoingCall, activeCall: softphoneCall } = useSoftphone();
     const { activeCall: polledCall } = useActiveCall();
-    const { activeCall: softphoneCall } = useSoftphone();
-    const onCall = !!(softphoneCall?.remoteNumber ?? polledCall?.caller);
+    const onCall = !!(incomingCall || outgoingCall || softphoneCall?.remoteNumber || polledCall?.caller);
 
     return (
         <div className={`app-shell ${onCall ? 'app-shell-on-call' : ''}`}>
             <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
             {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
-            <IncomingCallBanner />
-            <OutgoingCallBanner />
+            <CallScreen />
             <div className="app-shell-main">
                 <Topbar onMenuClick={() => setSidebarOpen(o => !o)} />
-                <StatusBar />
                 <main className="app-content">{children}</main>
             </div>
             <LiveAnalyticsBadge />
