@@ -236,7 +236,12 @@ async function runIvrMenu(channel, sessionId) {
 async function enterQueue(channel, sessionId) {
     const bridge = await getHoldingBridge();
     await bridge.addChannel({ channel: channel.id });
-    waitingQueue.push({ channel, sessionId, joinedAt: Date.now() });
+    // Captured here (not re-read from the module-level holdingBridge later)
+    // so that if a later customer's getHoldingBridge() call has to replace a
+    // dead bridge, this customer's eventual bridgeAgentLeg still removes
+    // them from the bridge they're actually sitting in — not whatever
+    // bridge happens to be current by then.
+    waitingQueue.push({ channel, sessionId, joinedAt: Date.now(), bridge });
     await upsertCallLog({ session_id: sessionId, status: 'queued' });
     console.log(`⏳ ${sessionId} entered the hold queue (${waitingQueue.length} waiting)`);
 }
@@ -297,7 +302,12 @@ async function dequeueNext() {
                     callerId: customerNumber,
                     timeout: 25
                 });
-                agentLegBySessionId.set(agentChannel.id, { channel: waiting.channel, sessionId: waiting.sessionId, agentId: agent.id });
+                agentLegBySessionId.set(agentChannel.id, {
+                    channel: waiting.channel,
+                    sessionId: waiting.sessionId,
+                    agentId: agent.id,
+                    bridge: waiting.bridge
+                });
                 ringGroup.push({ channel: agentChannel, agentId: agent.id });
             } catch (err) {
                 console.error(`❌ Failed to ring agent ${agent.id}:`, err.message);
@@ -333,6 +343,7 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
     const pending = agentLegBySessionId.get(agentChannel.id);
     agentLegBySessionId.delete(agentChannel.id);
     const customerChannel = pending ? pending.channel : null;
+    const customerHoldingBridge = pending ? pending.bridge : null;
 
     // No `await` between this check and claimedSessions.add() below — both
     // run synchronously in the same event-loop turn, so two agents
@@ -426,13 +437,24 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         console.log(`📴 Call ended: ${customerSessionId} <-> agent ${agentId} (${finalStatus})`);
     };
 
+    // teardown()'s own agentChannel.hangup() below cascades into a second
+    // StasisEnd for the agent leg even when the CUSTOMER hung up first —
+    // without this flag, that cascade would run runRatingIvr() against a
+    // customerChannel that's already gone. channel.play() fails silently
+    // against a dead channel (see playText's own .catch), so PlaybackFinished
+    // then never fires and that call hangs forever: a permanently-pending
+    // promise plus its listener, leaked on every customer-initiated hangup.
+    let customerGone = false;
+
     customerChannel.once('StasisEnd', async () => {
+        customerGone = true;
         await teardown('completed');
         await customerChannel.hangup().catch(() => {});
     });
 
     agentChannel.once('StasisEnd', async () => {
         await teardown('completed');
+        if (customerGone) return;
         const { ratingEnabled, ttsVoice, ttsSpeedScale } = await getIvrConfig();
         if (ratingEnabled) {
             await runRatingIvr(customerChannel, customerSessionId, { voiceKey: ttsVoice, speedScale: ttsSpeedScale }).catch(err =>
@@ -447,7 +469,7 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         const bridge = await client.bridges.create({ type: 'mixing' });
         state.bridge = bridge;
         activeBridgeBySessionId.set(customerSessionId, bridge);
-        await holdingBridge.removeChannel({ channel: customerChannel.id }).catch(() => {});
+        await (customerHoldingBridge || holdingBridge).removeChannel({ channel: customerChannel.id }).catch(() => {});
         await bridge.addChannel({ channel: [customerChannel.id, agentChannel.id] });
 
         state.startedAt = Date.now();
@@ -807,7 +829,20 @@ async function completeAddParty(destChannel, customerSessionId) {
         return;
     }
 
-    await bridge.addChannel({ channel: destChannel.id });
+    try {
+        await bridge.addChannel({ channel: destChannel.id });
+    } catch (err) {
+        // The bridge reference above can go stale between the check and
+        // here (the original call ending destroys it on Asterisk's side
+        // right in that window) — without this, add_party_status is left
+        // stuck at 'dialing' forever, since destChannel's own StasisEnd
+        // handler only reports in when the original call is still live,
+        // which by then it no longer is. The dashboard would otherwise show
+        // "Adding party…" indefinitely with no way to know it failed.
+        console.error(`❌ Failed to add party to call ${customerSessionId}:`, err.message);
+        await setAddPartyStatus(customerSessionId, 'failed').catch(() => {});
+        return;
+    }
     await setAddPartyStatus(customerSessionId, 'connected');
     console.log(`➕ Added party to call ${customerSessionId}`);
 }
