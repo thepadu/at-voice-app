@@ -78,8 +78,16 @@ async function synthesize(text, { voiceKey, speedScale = 1.0 } = {}) {
     // real-time transcoding to play it either.
     const ulawPath = path.join(SOUNDS_DIR, `tts-${hash}.ulaw`);
 
-    if (fs.existsSync(ulawPath)) {
-        return soundName;
+    // A zero/near-zero-byte file (a crash or kill mid-write, disk-full, etc.)
+    // is an unambiguous sign the previous synthesis never actually finished
+    // — existsSync alone would trust it forever otherwise. Not a general
+    // audio-quality check (that needs Asterisk's own playback outcome, see
+    // invalidate() below) — just catching the one failure mode a file-size
+    // floor can catch cheaply.
+    try {
+        if (fs.statSync(ulawPath).size > 200) return soundName;
+    } catch {
+        // ENOENT — no cached file yet, fall through to synthesize.
     }
 
     if (inFlight.has(hash)) {
@@ -105,4 +113,20 @@ async function synthesize(text, { voiceKey, speedScale = 1.0 } = {}) {
     return soundName;
 }
 
-module.exports = { synthesize };
+// Piper/sox occasionally produce a "successful" (zero exit code, plausible
+// file size) but garbled result — exit-code checking alone doesn't catch
+// this, and since synthesize() only checks fs.existsSync, a bad file just
+// gets replayed forever for every future request of the same text. This
+// lets the ARI app's own playback-outcome check (the only thing that can
+// actually tell good audio from bad) force a fresh synthesis next time.
+function invalidate(text, { voiceKey, speedScale = 1.0 } = {}) {
+    const hash = crypto
+        .createHash('sha256')
+        .update(`${voiceKey || 'default'}|${speedScale}|${text}`)
+        .digest('hex')
+        .slice(0, 16);
+    const ulawPath = path.join(SOUNDS_DIR, `tts-${hash}.ulaw`);
+    fs.unlink(ulawPath, () => {});
+}
+
+module.exports = { synthesize, invalidate };

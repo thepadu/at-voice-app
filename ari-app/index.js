@@ -17,7 +17,7 @@ process.on('uncaughtException', err => {
 
 const ari = require('ari-client');
 const { normalizePhone } = require('./lib/phone');
-const { synthesize } = require('./tts');
+const { synthesize, invalidate } = require('./tts');
 const {
     getIvrConfig,
     getIvrOptions,
@@ -96,7 +96,23 @@ async function playText(channel, text, voiceOpts) {
     // no await and nothing else referencing this promise, that was an
     // unhandled rejection every time a caller hung up mid-greeting/menu.
     channel.play({ media: `sound:${soundName}` }, playback).catch(() => {});
-    return new Promise(resolve => playback.once('PlaybackFinished', resolve));
+    const finished = await new Promise(resolve => playback.once('PlaybackFinished', (event, pb) => resolve(pb)));
+
+    // A garbled/corrupt cached synthesis (Piper/sox occasionally produce one
+    // despite exiting 0 — see tts.js) doesn't reject channel.play() or stop
+    // PlaybackFinished from firing; Asterisk just logs "Playback failed" and
+    // moves on, leaving the caller in dead air with nothing here noticing.
+    // Confirmed in production: the same cached greeting stayed broken for
+    // every caller across multiple days until manually deleted. Checking
+    // the finished playback's own state and invalidating the cache on
+    // anything but a clean finish makes that self-healing instead — the
+    // caller still hears nothing this one time, but the next caller gets a
+    // freshly re-synthesized (hopefully good) file rather than the same
+    // permanently-broken one.
+    if (finished?.state && finished.state !== 'done') {
+        console.error(`❌ Playback finished in unexpected state "${finished.state}" for ${soundName} — invalidating cache`);
+        invalidate(text, voiceOpts);
+    }
 }
 
 // Returns { promise, cancel } rather than a bare promise — when this loses
