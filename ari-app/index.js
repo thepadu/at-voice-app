@@ -46,6 +46,17 @@ const RATING_TIMEOUT_MS = 8000;
 const QUEUE_POLL_MS = 3000;
 const ADD_PARTY_POLL_MS = 3000;
 const GHOST_AGENT_POLL_MS = 30000;
+// A single ghost reconciliation is a normal, expected event (a tab closed
+// without a clean disconnect, a laptop put to sleep) — but the same agent
+// hitting this repeatedly in a short window is the signature of a genuinely
+// unstable connection (confirmed via live investigation: a browser tab
+// backgrounded long enough to get throttled, or real mobile network
+// instability), not a one-off. Flagging that pattern here replaces "someone
+// has to notice it by manually tailing logs" with an automatic signal that
+// scales past one agent being watched by hand.
+const GHOST_FLAP_WINDOW_MS = 60 * 60 * 1000;
+const GHOST_FLAP_THRESHOLD = 3;
+const ghostReconcileTimestamps = new Map();
 const HOLDING_BRIDGE_NAME = 'support-queue';
 // AT's trunk rules explicitly prohibit masking outbound caller ID — every
 // agent-placed call must present the same assigned Voice number, regardless
@@ -963,8 +974,21 @@ async function main() {
     setInterval(
         () =>
             reconcileGhostAgents()
-                .then(count => {
-                    if (count > 0) console.log(`👻 Reconciled ${count} ghost agent(s) back to offline`);
+                .then(staleIds => {
+                    if (staleIds.length === 0) return;
+                    console.log(`👻 Reconciled ${staleIds.length} ghost agent(s) back to offline`);
+
+                    const now = Date.now();
+                    for (const agentId of staleIds) {
+                        const recent = (ghostReconcileTimestamps.get(agentId) || []).filter(t => now - t < GHOST_FLAP_WINDOW_MS);
+                        recent.push(now);
+                        ghostReconcileTimestamps.set(agentId, recent);
+                        if (recent.length >= GHOST_FLAP_THRESHOLD) {
+                            console.warn(
+                                `⚠️ Agent ${agentId}'s softphone connection has dropped ${recent.length} times in the last hour — likely an unstable connection, not a one-off`
+                            );
+                        }
+                    }
                 })
                 .catch(err => console.error('❌ Ghost agent poll error:', err.message)),
         GHOST_AGENT_POLL_MS
@@ -983,7 +1007,7 @@ async function main() {
         console.log(`🧹 Reconciled ${staleAgentsReconciled} agent(s) stuck on-call from before this restart`);
 
     const ghostsReconciled = await reconcileGhostAgents();
-    if (ghostsReconciled > 0) console.log(`👻 Reconciled ${ghostsReconciled} ghost agent(s) back to offline on startup`);
+    if (ghostsReconciled.length > 0) console.log(`👻 Reconciled ${ghostsReconciled.length} ghost agent(s) back to offline on startup`);
 
     console.log(`✅ ARI app "${APP_NAME}" connected to ${ARI_URL} and listening`);
 }

@@ -226,15 +226,15 @@ async function reconcileGhostAgents() {
         .filter(a => !a.last_seen_at || new Date(a.last_seen_at).getTime() < staleBeforeMs)
         .map(a => a.id);
 
-    if (staleIds.length === 0) return 0;
+    if (staleIds.length === 0) return [];
 
     const { error: updateError } = await supabase.from('agents').update({ status: 'offline' }).in('id', staleIds);
     if (updateError) {
         console.error('❌ Failed to reconcile ghost agents:', updateError.message);
-        return 0;
+        return [];
     }
 
-    return staleIds.length;
+    return staleIds;
 }
 
 module.exports = {

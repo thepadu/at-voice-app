@@ -5,7 +5,7 @@ import { apiFetch } from './api';
 import { useAuth } from './auth';
 import { useToast } from './toast';
 
-type RegistrationState = 'unregistered' | 'registering' | 'registered' | 'failed';
+export type RegistrationState = 'unregistered' | 'registering' | 'registered' | 'failed';
 
 type IncomingCall = { session: Invitation; callerNumber: string };
 type OutgoingCall = { session: Inviter; remoteNumber: string };
@@ -54,6 +54,16 @@ type SinkableAudioElement = HTMLAudioElement & {
     setSinkId?: (sinkId: string) => Promise<void>;
 };
 
+// Explicit rather than a bare `audio: true` (which just takes whatever the
+// browser's own default happens to be) — the agent heard an echo of their
+// own voice during testing, most likely acoustic feedback from speakerphone
+// use re-entering the mic. This doesn't fully solve that (no web API can,
+// once a speaker's output is loud enough to re-enter the mic before the
+// canceller can act — that needs the OS/hardware's own AEC), but it does
+// guarantee the browser's best available cancellation is actually engaged
+// rather than left to chance.
+const CALL_AUDIO_CONSTRAINTS: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+
 // Attaches whatever audio tracks the peer connection is receiving to a
 // hidden <audio> element — SIP.js doesn't do this for you, it just hands you
 // the underlying RTCPeerConnection.
@@ -88,6 +98,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const [outgoingCall, setOutgoingCall] = useState<OutgoingCall | null>(null);
     const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
     const [speakerOn, setSpeakerOn] = useState(false);
+    // Bumping this tears down and fully rebuilds the connection (fresh
+    // credentials fetch, fresh UserAgent, fresh registration) via the main
+    // connection effect's own cleanup/re-run cycle below — the most robust
+    // way to recover from a tab that was backgrounded long enough for the
+    // browser to throttle its timers into a zombie connection state, since
+    // it doesn't assume the old transport is salvageable.
+    const [reconnectNonce, setReconnectNonce] = useState(0);
+    const reconnectDelayMsRef = useRef(1000);
     const [micPermissionDenied, setMicPermissionDenied] = useState(false);
     const hasSetAvailableRef = useRef(false);
     const hasRequestedMicRef = useRef(false);
@@ -142,6 +160,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         if (!user?.agentId) return;
 
         let cancelled = false;
+        let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
         (async () => {
             let creds;
@@ -168,8 +187,6 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 setRegistrationState('failed');
                 return;
             }
-
-            let everConnected = false;
 
             // Shared by the initial registration and every reconnect attempt
             // below, so a re-register after a dropped connection gets the
@@ -210,9 +227,18 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 // re-registering below is what actually recovers a dropped
                 // connection instead of leaving the agent silently
                 // unreachable until they refresh the page.
+                // SIP.js's own built-in reconnection is disabled
+                // (reconnectionAttempts: 0) in favor of the fully-owned
+                // backoff-driven reconnect in onDisconnect below — a single
+                // clear recovery path instead of two independent retry
+                // systems racing each other. A tab backgrounded long enough
+                // for the browser to throttle its timers can leave the old
+                // transport in a state SIP.js's own internal retry can't
+                // necessarily recover from anyway; rebuilding the whole
+                // UserAgent from scratch (fresh credentials, fresh
+                // transport) via reconnectNonce is the more robust bet.
                 transportOptions: { server: creds.wssUrl, keepAliveInterval: 30 },
-                reconnectionAttempts: Infinity,
-                reconnectionDelay: 4,
+                reconnectionAttempts: 0,
                 authorizationUsername: creds.username,
                 authorizationPassword: creds.password,
                 // Without this, the browser's own ICE gathering had zero
@@ -231,18 +257,22 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                     }
                 },
                 delegate: {
-                    onConnect: () => {
-                        if (!everConnected) {
-                            everConnected = true;
-                            return;
-                        }
-                        console.log('[softphone] transport reconnected, re-registering');
-                        registerNow();
-                    },
                     onDisconnect: err => {
                         console.warn('[softphone] transport disconnected:', err?.message);
                         setRegistrationState('unregistered');
                         showToast('Softphone connection lost — reconnecting…', 'error');
+
+                        // Exponential backoff (capped at 30s), reset to 1s on
+                        // the next successful registration below — recovers
+                        // a brief blip fast without hammering the server
+                        // through a sustained outage. Bumping reconnectNonce
+                        // tears this whole effect down and re-runs it from
+                        // scratch (fresh credentials, fresh UserAgent).
+                        const delay = reconnectDelayMsRef.current;
+                        reconnectDelayMsRef.current = Math.min(reconnectDelayMsRef.current * 2, 30000);
+                        reconnectTimer = setTimeout(() => {
+                            if (!cancelled) setReconnectNonce(n => n + 1);
+                        }, delay);
                     },
                     onInvite: (invitation: Invitation) => {
                         const callerNumber = invitation.remoteIdentity.uri.user ?? 'Unknown';
@@ -265,8 +295,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 const registerer = new Registerer(userAgent);
                 registererRef.current = registerer;
                 registerer.stateChange.addListener(state => {
-                    if (state === RegistererState.Registered) setRegistrationState('registered');
-                    else if (state === RegistererState.Unregistered) setRegistrationState('unregistered');
+                    if (state === RegistererState.Registered) {
+                        setRegistrationState('registered');
+                        reconnectDelayMsRef.current = 1000;
+                    } else if (state === RegistererState.Unregistered) {
+                        setRegistrationState('unregistered');
+                    }
                 });
                 await registerNow();
             } catch (err) {
@@ -280,13 +314,31 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
         return () => {
             cancelled = true;
+            clearTimeout(reconnectTimer);
             registererRef.current?.unregister().catch(() => {});
             userAgentRef.current?.stop().catch(() => {});
             userAgentRef.current = null;
             registererRef.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.agentId]);
+    }, [user?.agentId, reconnectNonce]);
+
+    // A tab backgrounded long enough for the browser to throttle its timers
+    // can leave the connection dead well before the backoff schedule above
+    // would have noticed on its own — jumping straight to a fresh reconnect
+    // the instant the agent actually looks at the screen again beats
+    // waiting out whatever delay happened to be pending.
+    useEffect(() => {
+        function handleVisibilityChange() {
+            if (document.visibilityState === 'visible' && registrationState !== 'registered') {
+                console.log('[softphone] tab visible again while disconnected — forcing a fresh reconnect');
+                reconnectDelayMsRef.current = 1000;
+                setReconnectNonce(n => n + 1);
+            }
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [registrationState]);
 
     // Tells the server "this browser is genuinely still connected" —
     // without it, agents.status='available' is just an unverified claim.
@@ -338,11 +390,50 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             .catch(() => setMicPermissionDenied(true));
     }, [registrationState]);
 
+    // Keeps the screen (and the tab driving the call) from being suspended
+    // by the phone's own screen-timeout mid-call — exactly the kind of
+    // background-throttling that was found dropping the SIP connection
+    // during idle periods, now specifically guarded against for the one
+    // window (an active call) where it matters most. Unsupported browsers
+    // (older Safari/iOS versions) just don't get the protection — nothing
+    // here depends on it existing.
+    useEffect(() => {
+        if (!activeCall || !('wakeLock' in navigator)) return;
+
+        let sentinel: WakeLockSentinel | null = null;
+        let cancelled = false;
+
+        async function acquire() {
+            try {
+                sentinel = await navigator.wakeLock.request('screen');
+            } catch (err) {
+                console.warn('[softphone] wake lock request failed:', err);
+            }
+        }
+        acquire();
+
+        // A wake lock is automatically released by the browser the instant
+        // the tab is hidden and does NOT reacquire itself — a call that
+        // survives a brief backgrounding (switching apps to check
+        // something) would otherwise silently lose the protection for the
+        // rest of its duration.
+        function handleVisibilityChange() {
+            if (document.visibilityState === 'visible' && !cancelled) acquire();
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            cancelled = true;
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            sentinel?.release().catch(() => {});
+        };
+    }, [activeCall]);
+
     const answer = useCallback(async () => {
         if (!incomingCall) return;
         try {
             await incomingCall.session.accept({
-                sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } }
+                sessionDescriptionHandlerOptions: { constraints: { audio: CALL_AUDIO_CONSTRAINTS, video: false } }
             });
         } catch {
             showToast('Could not answer — check microphone permissions', 'error');
@@ -485,7 +576,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             });
 
             try {
-                await inviter.invite({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } });
+                await inviter.invite({ sessionDescriptionHandlerOptions: { constraints: { audio: CALL_AUDIO_CONSTRAINTS, video: false } } });
             } catch {
                 showToast('Call failed', 'error');
                 setOutgoingCall(current => (current?.session === inviter ? null : current));

@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Menu, Search, Sun, Moon } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useTheme } from '../../lib/theme';
+import { useAuth } from '../../lib/auth';
+import { useSoftphone, RegistrationState } from '../../lib/softphone';
 import MyStatusControl from '../widgets/MyStatusControl';
 
 const TITLES: Record<string, string> = {
@@ -16,9 +18,28 @@ const TITLES: Record<string, string> = {
     '/settings': 'Settings'
 };
 
+// A dropped SIP connection previously only ever surfaced as a toast an
+// agent could easily miss mid-call, or a failed dial attempt — this makes
+// it something they can glance at and confirm at any time.
+const CONNECTION_LABELS: Record<RegistrationState, string> = {
+    registered: 'Connected',
+    registering: 'Connecting…',
+    unregistered: 'Reconnecting…',
+    failed: 'Disconnected'
+};
+
+const CONNECTION_COLORS: Record<RegistrationState, string> = {
+    registered: '#17A697',
+    registering: '#F39C12',
+    unregistered: '#F39C12',
+    failed: '#EF5350'
+};
+
 export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     const location = useLocation();
     const { darkMode, toggleDarkMode } = useTheme();
+    const { user } = useAuth();
+    const { registrationState } = useSoftphone();
 
     const { data } = useQuery({
         queryKey: ['agents-available-count'],
@@ -47,6 +68,15 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                     <span className="topbar-badge-dot" />
                     {data?.count ?? '—'} agents live
                 </div>
+                {user?.agentId && (
+                    <span
+                        className="status-pill topbar-connection-pill"
+                        style={{ background: CONNECTION_COLORS[registrationState] }}
+                        title="Your browser softphone's connection to the phone system"
+                    >
+                        {CONNECTION_LABELS[registrationState]}
+                    </span>
+                )}
                 <MyStatusControl />
                 <button className="topbar-theme-toggle" onClick={toggleDarkMode} title="Toggle night shift theme" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {darkMode ? <><Sun size={16} /> Light</> : <><Moon size={16} /> Night shift</>}
