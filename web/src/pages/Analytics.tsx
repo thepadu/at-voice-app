@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Trophy } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import CallsByHourChart from '../components/CallsByHourChart';
 import Pagination from '../components/Pagination';
@@ -187,7 +188,7 @@ export default function Analytics() {
             </div>
 
             <div className="panel">
-                <h3>🏆 Agent performance (all-time)</h3>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={18} /> Agent performance (all-time)</h3>
                 {ranked.length === 0 && <p className="empty">No agent call data yet.</p>}
                 {ranked.length > 0 && (
                     <>

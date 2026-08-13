@@ -23,6 +23,9 @@ type SoftphoneContextValue = {
     toggleMute: () => void;
     toggleHold: () => void;
     placeCall: (destinationE164: string) => Promise<void>;
+    audioOutputSupported: boolean;
+    speakerOn: boolean;
+    toggleSpeaker: () => Promise<void>;
 };
 
 const SoftphoneContext = createContext<SoftphoneContextValue>({
@@ -36,8 +39,18 @@ const SoftphoneContext = createContext<SoftphoneContextValue>({
     cancelOutgoingCall: () => {},
     toggleMute: () => {},
     toggleHold: () => {},
-    placeCall: async () => {}
+    placeCall: async () => {},
+    audioOutputSupported: false,
+    speakerOn: false,
+    toggleSpeaker: async () => {}
 });
+
+// setSinkId() is a real method on HTMLMediaElement in Chrome/Edge but isn't
+// in the standard lib.dom typings yet (Safari/Firefox don't implement it at
+// all) — narrowed locally rather than widening the global HTMLAudioElement type.
+type SinkableAudioElement = HTMLAudioElement & {
+    setSinkId?: (sinkId: string) => Promise<void>;
+};
 
 // Attaches whatever audio tracks the peer connection is receiving to a
 // hidden <audio> element — SIP.js doesn't do this for you, it just hands you
@@ -72,6 +85,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
     const [outgoingCall, setOutgoingCall] = useState<OutgoingCall | null>(null);
     const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+    const [speakerOn, setSpeakerOn] = useState(false);
+
+    const audioOutputSupported = typeof (window.HTMLMediaElement?.prototype as SinkableAudioElement)?.setSinkId === 'function';
 
     useEffect(() => {
         if (!remoteAudioRef.current) {
@@ -98,6 +114,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         // the *next* call silent with no error or visual cue.
         if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
         setActiveCall(null);
+        setSpeakerOn(false);
     }, []);
 
     const wireSessionStateChange = useCallback(
@@ -352,6 +369,40 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         setActiveCall({ ...activeCall, held: nextHeld });
     }, [activeCall, showToast]);
 
+    // "Earpiece by default, speaker on request" is the real product intent,
+    // but browsers don't expose a distinct earpiece device to switch to —
+    // enumerateDevices() just lists whatever named outputs the OS reports,
+    // and the default one is already earpiece-equivalent on mobile Chrome.
+    // So this toggles between that default and the first non-default output
+    // it can find (labelled "speaker" when one is), rather than pretending
+    // to control physical hardware it has no API for.
+    const toggleSpeaker = useCallback(async () => {
+        const audioEl = remoteAudioRef.current as SinkableAudioElement | null;
+        if (!audioEl?.setSinkId) return;
+
+        try {
+            if (speakerOn) {
+                await audioEl.setSinkId('');
+                setSpeakerOn(false);
+                return;
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const outputs = devices.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== '');
+            const speaker = outputs.find(d => /speaker/i.test(d.label)) ?? outputs[0];
+
+            if (!speaker) {
+                showToast('No alternate output device found', 'error');
+                return;
+            }
+
+            await audioEl.setSinkId(speaker.deviceId);
+            setSpeakerOn(true);
+        } catch {
+            showToast('Failed to switch audio output', 'error');
+        }
+    }, [speakerOn, showToast]);
+
     const cancelOutgoingCall = useCallback(() => {
         if (!outgoingCall) return;
         const { session } = outgoingCall;
@@ -413,7 +464,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 cancelOutgoingCall,
                 toggleMute,
                 toggleHold,
-                placeCall
+                placeCall,
+                audioOutputSupported,
+                speakerOn,
+                toggleSpeaker
             }}
         >
             {children}

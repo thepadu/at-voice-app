@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { Trophy, TrendingUp } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import StatusPill from '../components/StatusPill';
@@ -46,13 +47,13 @@ export default function Dashboard() {
         refetchInterval: 10000
     });
 
-    const { data: liveData } = useQuery({
+    const { data: liveData, isLoading: liveLoading } = useQuery({
         queryKey: ['calls-live'],
         queryFn: () => apiFetch('/api/calls/live'),
         refetchInterval: 10000
     });
 
-    const { data: statsData } = useQuery({
+    const { data: statsData, isLoading: statsLoading } = useQuery({
         queryKey: ['agents-stats'],
         queryFn: () => apiFetch('/api/agents/stats'),
         refetchInterval: 30000
@@ -78,22 +79,17 @@ export default function Dashboard() {
                     <div className="card-label">Total Calls</div>
                     <p>{summary?.total ?? '—'}</p>
                 </div>
-                <div className="card card-multi">
-                    <div className="card-label">Contact Reasons</div>
-                    <div className="card-multi-stats">
-                        <div className="card-multi-stat">
-                            <span className="card-multi-value">{summary?.login ?? '—'}</span>
-                            <span className="card-multi-sublabel">Login</span>
-                        </div>
-                        <div className="card-multi-stat">
-                            <span className="card-multi-value">{summary?.deposit ?? '—'}</span>
-                            <span className="card-multi-sublabel">Deposit</span>
-                        </div>
-                        <div className="card-multi-stat">
-                            <span className="card-multi-value">{summary?.agentRequests ?? '—'}</span>
-                            <span className="card-multi-sublabel">Agent</span>
-                        </div>
-                    </div>
+                <div className="card">
+                    <div className="card-label">Login Issues</div>
+                    <p>{summary?.login ?? '—'}</p>
+                </div>
+                <div className="card">
+                    <div className="card-label">Deposit Issues</div>
+                    <p>{summary?.deposit ?? '—'}</p>
+                </div>
+                <div className="card">
+                    <div className="card-label">Agent Requests</div>
+                    <p>{summary?.agentRequests ?? '—'}</p>
                 </div>
                 <div className="card">
                     <div className="card-label">Outgoing</div>
@@ -109,14 +105,14 @@ export default function Dashboard() {
 
             <div className="panel">
                 <div className="panel-header">
-                    <h3>🔴 Live Now</h3>
+                    <h3>Live Now</h3>
                     {live.length > LIVE_NOW_LIMIT && (
                         <span className="hint" style={{ margin: 0 }}>
                             Showing {LIVE_NOW_LIMIT} of {live.length}
                         </span>
                     )}
                 </div>
-                {live.length === 0 && <p className="empty">No calls in progress</p>}
+                {live.length === 0 && !liveLoading && <p className="empty">No calls in progress</p>}
                 {live.length > 0 && (
                     <table>
                         <thead>
@@ -148,10 +144,10 @@ export default function Dashboard() {
             {isSupervisor ? (
                 <div className="panel">
                     <div className="panel-header">
-                        <h3>🏆 Top Agents</h3>
+                        <h3 style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={18} /> Top Agents</h3>
                         <Link to="/analytics" className="btn-link">Full analytics →</Link>
                     </div>
-                    {leaderboard.length === 0 && <p className="empty">No agent call data yet</p>}
+                    {leaderboard.length === 0 && !statsLoading && <p className="empty">No agent call data yet</p>}
                     {leaderboard.length > 0 && (
                         <table>
                             <tbody>
@@ -168,7 +164,7 @@ export default function Dashboard() {
                 </div>
             ) : (
                 <div className="panel">
-                    <h3>📈 My Performance</h3>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: 6 }}><TrendingUp size={18} /> My Performance</h3>
                     {myStats ? (
                         <div>
                             <div className="analytics-row">
@@ -184,9 +180,9 @@ export default function Dashboard() {
                                 <strong>{myStats.avgHandleTime}s</strong>
                             </div>
                         </div>
-                    ) : (
+                    ) : !statsLoading ? (
                         <p className="empty">No call data yet — this shows up once your linked number takes a call.</p>
-                    )}
+                    ) : null}
                 </div>
             )}
         </div>

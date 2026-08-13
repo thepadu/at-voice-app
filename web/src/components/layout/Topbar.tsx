@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { Menu, Search, Sun, Moon } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useTheme } from '../../lib/theme';
 import MyStatusControl from '../widgets/MyStatusControl';
@@ -31,14 +32,14 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         <header className="topbar">
             <div className="topbar-left">
                 <button className="topbar-menu-btn" onClick={onMenuClick} aria-label="Open menu">
-                    ☰
+                    <Menu size={20} />
                 </button>
                 <div className="topbar-title">{title}</div>
             </div>
             <div className="topbar-right">
                 <div className="topbar-search">
                     <span className="topbar-search-icon" aria-hidden="true">
-                        ⌕
+                        <Search size={16} />
                     </span>
                     Search calls, agents…
                 </div>
@@ -47,8 +48,8 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                     {data?.count ?? '—'} agents live
                 </div>
                 <MyStatusControl />
-                <button className="topbar-theme-toggle" onClick={toggleDarkMode} title="Toggle night shift theme">
-                    {darkMode ? '☀️ Light' : '🌙 Night shift'}
+                <button className="topbar-theme-toggle" onClick={toggleDarkMode} title="Toggle night shift theme" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {darkMode ? <><Sun size={16} /> Light</> : <><Moon size={16} /> Night shift</>}
                 </button>
             </div>
         </header>

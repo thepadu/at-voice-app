@@ -338,28 +338,6 @@ h1, h2, h3, h4 {
     font-weight: 600;
 }
 
-.card-multi-stats {
-    display: flex;
-    gap: 14px;
-    margin-top: 8px;
-}
-
-.card-multi-stat {
-    display: flex;
-    flex-direction: column;
-}
-
-.card-multi-value {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 20px;
-    font-weight: 800;
-    color: var(--ink);
-}
-
-.card-multi-sublabel {
-    font-size: 11px;
-    color: var(--muted);
-}
 
 .panel {
     background: var(--surface);
@@ -491,6 +469,13 @@ tr:not(:last-child) td {
     gap: 8px;
 }
 
+.calls-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
 /* ── Buttons ───────────────────────────────────────────────────────── */
 
 .btn {
@@ -519,8 +504,9 @@ tr:not(:last-child) td {
 }
 
 .btn-secondary {
-    background: #F5F5F5;
+    background: var(--page-bg);
     color: var(--ink);
+    border: 1px solid var(--border);
 }
 
 .btn-danger {
@@ -544,19 +530,20 @@ tr:not(:last-child) td {
 }
 
 .btn-icon {
-    background: none;
-    border: none;
-    padding: 4px;
+    background: var(--page-bg);
+    border: 1px solid var(--border);
+    padding: 6px;
     color: var(--secondary);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    border-radius: 6px;
+    border-radius: 8px;
 }
 
 .btn-icon:hover {
-    background: var(--page-bg);
-    color: var(--ink);
+    background: var(--tint);
+    border-color: var(--brand);
+    color: var(--brand);
 }
 
 .btn-link-danger {
@@ -986,11 +973,11 @@ textarea {
     position: absolute;
     bottom: 66px;
     right: 0;
-    width: 280px;
+    width: 300px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 16px;
+    border-radius: 20px;
+    padding: 18px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }
 
@@ -1014,10 +1001,11 @@ textarea {
     margin-bottom: 10px;
 }
 
-.dialer-input-row {
+.dialer-display-row {
     display: flex;
+    align-items: center;
     gap: 6px;
-    margin-bottom: 10px;
+    margin-bottom: 14px;
 }
 
 .dialer-country-code {
@@ -1027,16 +1015,45 @@ textarea {
     border: none;
     border-radius: 8px;
     padding: 0 10px;
+    height: 28px;
     font-size: 13px;
     font-weight: 700;
     font-family: inherit;
     cursor: pointer;
 }
 
-.dialer-input {
+.dialer-display {
     flex: 1;
     min-width: 0;
+    border: none;
+    background: none;
     text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 4px 0;
+}
+
+.dialer-display:focus {
+    outline: none;
+}
+
+.dialer-backspace {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 6px;
+    border-radius: 8px;
+}
+
+.dialer-backspace:hover {
+    background: var(--page-bg);
+    color: var(--ink);
 }
 
 .dialer-recent {
@@ -1061,7 +1078,7 @@ textarea {
     border: none;
     padding: 6px 4px;
     font-size: 13px;
-    font-family: inherit;
+    font-family: 'JetBrains Mono', monospace;
     color: var(--ink);
     cursor: pointer;
     border-radius: 6px;
@@ -1074,26 +1091,57 @@ textarea {
 .dialer-keypad {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-    margin-bottom: 10px;
+    gap: 8px;
+    margin-bottom: 14px;
+    justify-content: center;
 }
 
 .dialer-key {
     cursor: pointer;
-    text-align: center;
-    padding: 10px 0;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: var(--page-bg);
     border: none;
-    border-radius: 8px;
-    font-size: 14px;
+    border-radius: 50%;
+    font-size: 20px;
     font-weight: 600;
-    font-family: inherit;
+    font-family: 'JetBrains Mono', monospace;
     color: var(--ink);
+}
+
+.dialer-key:hover {
+    background: var(--tint);
+    color: var(--brand);
 }
 
 .dialer-popover-actions {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.dialer-call-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--brand);
+    color: white;
+}
+
+.dialer-call-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
 }
 
 .pagination {
@@ -1109,9 +1157,6 @@ textarea {
     color: var(--muted);
 }
 
-.dialer-popover-actions .btn {
-    flex: 1;
-}
 
 .floating-analytics {
     position: fixed;
@@ -1290,24 +1335,54 @@ textarea {
    the dashboard — customer lookups, tickets — while on a call. Layout.tsx
    separately dims the sidebar/topbar for focus instead of disabling them. */
 
-.call-screen {
+.call-screen-stack {
     position: fixed;
-    top: 96px;
+    top: 80px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 950;
-    width: 380px;
+    width: 460px;
     max-width: calc(100vw - 32px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.call-screen {
+    width: 100%;
     background: var(--surface);
-    border-radius: 24px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
-    padding: 28px 24px;
+    border-radius: 28px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+    padding: 36px 32px;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
     gap: 4px;
     animation: call-screen-drop-in 0.25s ease-out;
+}
+
+.ticket-drawer {
+    width: 100%;
+    background: var(--surface);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+    padding: 20px 24px;
+    text-align: left;
+    max-height: 55vh;
+    overflow-y: auto;
+    animation: call-screen-drop-in 0.2s ease-out;
+}
+
+.ticket-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ticket-drawer-header h4 {
+    margin: 0;
 }
 
 @keyframes call-screen-drop-in {
@@ -1367,7 +1442,7 @@ textarea {
 }
 
 .call-screen-number {
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 20px;
     font-weight: 700;
     color: var(--ink);
@@ -1377,6 +1452,11 @@ textarea {
     font-size: 14px;
     color: var(--secondary);
     margin-bottom: 14px;
+}
+
+.call-screen-timer {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
 }
 
 .call-screen-add-party-status {
@@ -1465,9 +1545,11 @@ textarea {
    starts (see Layout.tsx) — dimmed, not disabled, since an agent still
    legitimately needs to navigate or open a ticket mid-call. */
 .app-shell-on-call .sidebar,
-.app-shell-on-call .topbar {
+.app-shell-on-call .topbar,
+.app-shell-on-call .app-content {
     opacity: 0.6;
-    transition: opacity 0.2s ease;
+    filter: blur(4px);
+    transition: opacity 0.2s ease, filter 0.2s ease;
 }
 
 /* ── Wrap-up modal ─────────────────────────────────────────────────── */
@@ -1621,9 +1703,12 @@ textarea {
         padding: 20px;
     }
 
-    .call-screen {
+    .call-screen-stack {
         top: calc(72px + env(safe-area-inset-top));
         width: calc(100vw - 24px);
+    }
+
+    .call-screen {
         padding: 22px 18px;
     }
 

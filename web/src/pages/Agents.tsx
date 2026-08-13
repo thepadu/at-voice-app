@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
 import { useModalA11y } from '../lib/useModalA11y';
+import { Users } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 import StatusDropdown from '../components/StatusDropdown';
 import Pagination from '../components/Pagination';
@@ -34,7 +35,7 @@ export default function Agents() {
     const [rosterPage, setRosterPage] = useState(1);
     const [search, setSearch] = useState('');
 
-    const { data: agentsData } = useQuery({
+    const { data: agentsData, isLoading: agentsLoading } = useQuery({
         queryKey: ['agents', rosterPage, search],
         queryFn: () => apiFetch(`/api/agents?page=${rosterPage}&pageSize=${PAGE_SIZE}&q=${encodeURIComponent(search)}`)
     });
@@ -109,7 +110,7 @@ export default function Agents() {
         <div>
             <div className="panel">
                 <div className="panel-header">
-                    <h3>👥 Team {rosterTotal > 0 && <span className="hint" style={{ fontWeight: 400 }}>({rosterTotal})</span>}</h3>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Users size={18} /> Team {rosterTotal > 0 && <span className="hint" style={{ fontWeight: 400 }}>({rosterTotal})</span>}</h3>
                     <div style={{ display: 'flex', gap: 8 }}>
                         <Link to="/analytics" className="btn-link">Performance →</Link>
                         <button className="btn btn-primary" onClick={openAddForm}>+ Add Agent</button>
@@ -128,7 +129,7 @@ export default function Agents() {
                     style={{ marginBottom: 14 }}
                 />
 
-                {agents.length === 0 && (
+                {agents.length === 0 && !agentsLoading && (
                     <p className="empty">{search ? `No agents match "${search}".` : 'No agents yet — add your first one.'}</p>
                 )}
 
@@ -164,7 +165,7 @@ export default function Agents() {
                             <div className="agent-card-actions">
                                 <button className="btn btn-link" onClick={() => openEditForm(agent)}>Edit</button>
                                 <button className="btn btn-link btn-link-danger" onClick={() => setPendingDelete(agent)}>
-                                    Delete
+                                    Remove
                                 </button>
                             </div>
                         </div>

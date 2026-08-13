@@ -245,7 +245,7 @@ export default function IvrEditor() {
                                         Save
                                     </button>
                                     <button className="btn btn-link btn-link-danger" onClick={() => setPendingDelete(option)}>
-                                        Delete
+                                        Remove
                                     </button>
                                 </div>
                             </div>

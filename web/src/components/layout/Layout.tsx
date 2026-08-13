@@ -3,7 +3,6 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import CallScreen from '../widgets/CallScreen';
 import WrapUpModal from '../widgets/WrapUpModal';
-import QuickTicketModal from '../widgets/QuickTicketModal';
 import FloatingDialer from '../widgets/FloatingDialer';
 import LiveAnalyticsBadge from '../widgets/LiveAnalyticsBadge';
 import { useKeyboardShortcuts } from '../../lib/useKeyboardShortcuts';
@@ -39,7 +38,6 @@ export default function Layout({ children }: { children: ReactNode }) {
             <LiveAnalyticsBadge />
             <FloatingDialer />
             <WrapUpModal />
-            <QuickTicketModal />
         </div>
     );
 }

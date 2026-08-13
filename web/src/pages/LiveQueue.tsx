@@ -24,7 +24,7 @@ function waitRowClass(call: QueuedCall) {
 }
 
 export default function LiveQueue() {
-    const { data: queueData } = useQuery({
+    const { data: queueData, isLoading: queueLoading } = useQuery({
         queryKey: ['queue'],
         queryFn: () => apiFetch('/api/queue'),
         refetchInterval: 5000
@@ -75,7 +75,7 @@ export default function LiveQueue() {
                         </tr>
                     </thead>
                     <tbody>
-                        {calls.length === 0 && (
+                        {calls.length === 0 && !queueLoading && (
                             <tr><td colSpan={3} className="empty">Queue is empty. All callers answered.</td></tr>
                         )}
                         {calls.map(call => (

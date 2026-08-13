@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { LogOut } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { apiFetch } from '../../lib/api';
 
@@ -74,8 +75,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                         <div className="sidebar-user-name">{user.name || user.email}</div>
                         <div className="sidebar-user-role">{user.role === 'supervisor' ? 'Supervisor' : 'Agent'}</div>
                     </div>
-                    <a href="/logout" title="Log out" className="sidebar-logout">
-                        ⏻
+                    <a href="/logout" title="Log out" aria-label="Log out" className="sidebar-logout">
+                        <LogOut size={18} />
                     </a>
                 </div>
             )}

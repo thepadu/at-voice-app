@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Phone, Delete } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { useSoftphone } from '../../lib/softphone';
@@ -84,7 +85,7 @@ export default function FloatingDialer() {
             {open && (
                 <div className="dialer-popover dialer-popover-open">
                     <div className="dialer-popover-title">Dialer</div>
-                    <div className="dialer-input-row">
+                    <div className="dialer-display-row">
                         <button className="dialer-country-code" onClick={insertCountryCode} title="Insert +254" type="button">
                             +254
                         </button>
@@ -93,9 +94,19 @@ export default function FloatingDialer() {
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && makeCall()}
                             placeholder="Enter number"
-                            className="dialer-input"
+                            className="dialer-display"
                             autoFocus
                         />
+                        {input && (
+                            <button
+                                className="dialer-backspace"
+                                onClick={() => setInput(i => i.slice(0, -1))}
+                                aria-label="Backspace"
+                                type="button"
+                            >
+                                <Delete size={18} />
+                            </button>
+                        )}
                     </div>
                     <div className="dialer-keypad">
                         {KEYS.map(k => (
@@ -106,12 +117,10 @@ export default function FloatingDialer() {
                     </div>
                     {error && <p className="error">{error}</p>}
                     <div className="dialer-popover-actions">
-                        <button className="btn btn-primary" onClick={makeCall} disabled={calling}>
-                            {calling ? 'Calling…' : 'Call'}
+                        <button className="dialer-call-btn" onClick={makeCall} disabled={calling} aria-label="Call">
+                            <Phone size={22} />
                         </button>
-                        <button className="btn btn-secondary" onClick={() => setInput('')}>
-                            Clear
-                        </button>
+                        {calling && <span className="hint">Calling…</span>}
                     </div>
                     {recent.length > 0 && (
                         <div className="dialer-recent">

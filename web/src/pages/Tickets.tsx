@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
+import { useAuth } from '../lib/auth';
+import { useModalA11y } from '../lib/useModalA11y';
 import Pagination from '../components/Pagination';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 type Call = {
     session_id: string;
@@ -35,6 +38,7 @@ function errorMessage(err: unknown) {
 export default function Tickets() {
     const queryClient = useQueryClient();
     const showToast = useToast();
+    const { isSupervisor } = useAuth();
 
     const [ticketsPage, setTicketsPage] = useState(1);
 
@@ -86,6 +90,39 @@ export default function Tickets() {
         },
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
     });
+
+    const [addTagOpen, setAddTagOpen] = useState(false);
+    const [newTagName, setNewTagName] = useState('');
+    const [addTagError, setAddTagError] = useState('');
+    const [pendingDeleteTag, setPendingDeleteTag] = useState<string | null>(null);
+
+    function invalidateTags() {
+        queryClient.invalidateQueries({ queryKey: ['ticket-tags'] });
+    }
+
+    const addTag = useMutation({
+        mutationFn: () => apiFetch('/api/ticket-tags', { method: 'POST', body: JSON.stringify({ name: newTagName.trim() }) }),
+        onSuccess: () => {
+            showToast('Tag added');
+            setAddTagOpen(false);
+            setNewTagName('');
+            setAddTagError('');
+            invalidateTags();
+        },
+        onError: (err: unknown) => setAddTagError(errorMessage(err))
+    });
+
+    const deleteTag = useMutation({
+        mutationFn: (name: string) => apiFetch(`/api/ticket-tags/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+        onSuccess: (_data, name) => {
+            showToast(`Tag "${name}" removed`);
+            invalidateTags();
+        },
+        onError: (err: unknown) => showToast(errorMessage(err), 'error'),
+        onSettled: () => setPendingDeleteTag(null)
+    });
+
+    const addTagModalRef = useModalA11y(addTagOpen, () => setAddTagOpen(false));
 
     return (
         <div className="ivr-layout">
@@ -141,6 +178,25 @@ export default function Tickets() {
                     </table>
                     <Pagination page={ticketsPage} totalPages={ticketsTotalPages} onPageChange={setTicketsPage} />
                 </div>
+
+                {isSupervisor && (
+                    <div className="panel">
+                        <div className="panel-header">
+                            <h3>Ticket tags</h3>
+                            <button className="btn btn-primary" onClick={() => setAddTagOpen(true)}>+ Add tag</button>
+                        </div>
+                        <p className="hint">These are the tags agents can pick from when logging a ticket.</p>
+                        {tags.length === 0 && <p className="empty">No tags yet — add one to get started.</p>}
+                        {tags.map(t => (
+                            <div className="recent-call-row" key={t}>
+                                <div style={{ fontWeight: 600 }}>{t}</div>
+                                <button className="btn btn-link btn-link-danger" onClick={() => setPendingDeleteTag(t)}>
+                                    Remove
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="panel">
@@ -188,6 +244,35 @@ export default function Tickets() {
                     </div>
                 )}
             </div>
+
+            {addTagOpen && (
+                <div className="modal-overlay" onClick={() => setAddTagOpen(false)}>
+                    <div ref={addTagModalRef} className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+                        <h3>Add ticket tag</h3>
+                        <label>
+                            Tag name
+                            <input value={newTagName} onChange={e => setNewTagName(e.target.value)} autoFocus />
+                        </label>
+                        {addTagError && <p className="error">{addTagError}</p>}
+                        <div className="modal-actions">
+                            <button className="btn btn-secondary" onClick={() => setAddTagOpen(false)}>Cancel</button>
+                            <button className="btn btn-primary" onClick={() => addTag.mutate()} disabled={addTag.isPending || !newTagName.trim()}>
+                                Add
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <ConfirmDialog
+                open={!!pendingDeleteTag}
+                title="Remove ticket tag"
+                message={`Remove the "${pendingDeleteTag}" tag? Agents will no longer be able to select it for new tickets.`}
+                confirmLabel="Remove"
+                danger
+                onConfirm={() => pendingDeleteTag && deleteTag.mutate(pendingDeleteTag)}
+                onCancel={() => setPendingDeleteTag(null)}
+            />
         </div>
     );
 }

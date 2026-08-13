@@ -44,12 +44,6 @@ function DetailsButton({ onOpen }: { onOpen: () => void }) {
 
 const PAGE_SIZE = 25;
 
-function answeredLabel(status: string | null) {
-    if (status === 'completed') return '✅ Answered';
-    if (status === 'failed') return '❌ Not answered';
-    return '—';
-}
-
 function missedReason(status: string | null) {
     if (status === 'forwarded') return 'Forwarded (nobody online)';
     if (status === 'after_hours') return 'Outside business hours';
@@ -171,7 +165,7 @@ export default function Calls() {
                                     <td>{call.agent_name ?? '—'}</td>
                                     <td><StatusPill value={call.status ?? 'unknown'} /></td>
                                     <td>{new Date(call.created_at).toLocaleString()}</td>
-                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
+                                    <td className="calls-row-actions"><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -185,7 +179,8 @@ export default function Calls() {
                     <table>
                         <thead>
                             <tr>
-                                <th>Caller</th>
+                                <th></th>
+                                <th>Caller / Number</th>
                                 <th>Agent</th>
                                 <th>Status</th>
                                 <th>Time</th>
@@ -194,15 +189,16 @@ export default function Calls() {
                         </thead>
                         <tbody>
                             {calls.length === 0 && (
-                                <tr><td colSpan={5} className="empty">No incoming calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
+                                <tr><td colSpan={6} className="empty">No incoming calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
                             )}
                             {calls.map(call => (
                                 <tr key={call.session_id}>
+                                    <td><DirectionIcon call={call} /></td>
                                     <td>{call.caller}</td>
                                     <td>{call.agent_name ?? '—'}</td>
                                     <td><StatusPill value={call.status ?? 'unknown'} /></td>
                                     <td>{new Date(call.created_at).toLocaleString()}</td>
-                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
+                                    <td className="calls-row-actions"><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -216,28 +212,29 @@ export default function Calls() {
                     <table>
                         <thead>
                             <tr>
-                                <th>Number</th>
+                                <th></th>
+                                <th>Caller / Number</th>
                                 <th>Agent</th>
-                                <th>Duration</th>
-                                <th>Answered</th>
-                                <th>Outcome</th>
+                                <th>Status</th>
                                 <th>Time</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             {calls.length === 0 && (
-                                <tr><td colSpan={7} className="empty">No outgoing calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
+                                <tr><td colSpan={6} className="empty">No outgoing calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
                             )}
                             {calls.map(call => (
                                 <tr key={call.session_id}>
+                                    <td><DirectionIcon call={call} /></td>
                                     <td>{call.caller}</td>
                                     <td>{call.agent_name ?? '—'}</td>
-                                    <td>{call.duration ?? 0}s</td>
-                                    <td>{answeredLabel(call.status)}</td>
                                     <td><StatusPill value={call.status ?? 'unknown'} /></td>
-                                    <td>{new Date(call.created_at).toLocaleString()}</td>
-                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
+                                    <td>
+                                        {new Date(call.created_at).toLocaleString()}
+                                        <div className="hint">{call.duration ?? 0}s</div>
+                                    </td>
+                                    <td className="calls-row-actions"><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -251,23 +248,29 @@ export default function Calls() {
                     <table>
                         <thead>
                             <tr>
-                                <th>Caller</th>
-                                <th>Reason</th>
-                                <th>Time</th>
                                 <th></th>
+                                <th>Caller / Number</th>
+                                <th>Agent</th>
+                                <th>Status</th>
+                                <th>Time</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             {calls.length === 0 && (
-                                <tr><td colSpan={5} className="empty">No missed calls{filtersActive ? ' match these filters.' : ' outstanding.'}</td></tr>
+                                <tr><td colSpan={6} className="empty">No missed calls{filtersActive ? ' match these filters.' : ' outstanding.'}</td></tr>
                             )}
                             {calls.map(call => (
                                 <tr key={call.session_id}>
+                                    <td><DirectionIcon call={call} /></td>
                                     <td>{call.caller}</td>
-                                    <td>{missedReason(call.status)}</td>
-                                    <td>{new Date(call.created_at).toLocaleString()}</td>
+                                    <td>{call.agent_name ?? '—'}</td>
                                     <td>
+                                        <StatusPill value={call.status ?? 'unknown'} />
+                                        <div className="hint">{missedReason(call.status)}</div>
+                                    </td>
+                                    <td>{new Date(call.created_at).toLocaleString()}</td>
+                                    <td className="calls-row-actions">
                                         <button
                                             className={call.called_back ? 'btn btn-callback-done' : 'btn btn-primary'}
                                             onClick={() => callBack(call.caller)}
@@ -275,8 +278,8 @@ export default function Calls() {
                                         >
                                             {call.called_back ? '✓ Called back' : 'Call back'}
                                         </button>
+                                        <DetailsButton onOpen={() => setDetailsCall(call)} />
                                     </td>
-                                    <td><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
                                 </tr>
                             ))}
                         </tbody>
