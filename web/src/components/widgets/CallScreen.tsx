@@ -147,7 +147,7 @@ export default function CallScreen() {
         speakerOn,
         toggleSpeaker
     } = useSoftphone();
-    const { activeCall: polledCall, openQuickTicket } = useActiveCall();
+    const { activeCall: polledCall, openQuickTicket, quickTicketOpen } = useActiveCall();
     const hasGestured = useHasUserGestured();
     const originalTitle = useRef(document.title);
     const [seconds, setSeconds] = useState(0);
@@ -219,7 +219,11 @@ export default function CallScreen() {
     // itself if an incomingCall was somehow ringing at the same instant).
     const phase = incomingCall ? 'incoming' : outgoingCall ? 'outgoing' : activeCaller ? 'active' : null;
 
-    if (!phase) return null;
+    // The ticket drawer can only be opened from the active-call controls, but
+    // needs to survive the call ending — an agent still finishing a ticket
+    // when the customer hangs up shouldn't have it snatched away just
+    // because `phase` (and the call card above it) disappeared.
+    if (!phase && !quickTicketOpen) return null;
 
     const displayNumber = phase === 'incoming' ? incomingCall!.callerNumber : phase === 'outgoing' ? outgoingCall!.remoteNumber : activeCaller;
     const addPartyStatus = polledCall?.add_party_status;
@@ -227,6 +231,7 @@ export default function CallScreen() {
 
     return (
         <div className="call-screen-stack">
+            {phase && (
             <div className={`call-screen call-screen-${phase} ${phase === 'incoming' && !hasGestured ? 'call-screen-pulse' : ''}`}>
                 <div className="call-screen-avatar-wrap">
                     {phase === 'incoming' && <span className="call-screen-ripple" />}
@@ -332,7 +337,8 @@ export default function CallScreen() {
                     </>
                 )}
             </div>
-            {phase === 'active' && <TicketDrawer />}
+            )}
+            <TicketDrawer />
         </div>
     );
 }

@@ -111,8 +111,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         // The <audio> element persists across calls (it's created once per
         // softphone session, not per call) — if a call ends while still on
         // hold, its .muted flag would otherwise stay true forever, leaving
-        // the *next* call silent with no error or visual cue.
-        if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
+        // the *next* call silent with no error or visual cue. Same reasoning
+        // for the output sink: if a call ends while on speaker, the next
+        // call would silently keep playing through it even though the UI
+        // (reset below) shows the earpiece icon again.
+        if (remoteAudioRef.current) {
+            remoteAudioRef.current.muted = false;
+            (remoteAudioRef.current as SinkableAudioElement).setSinkId?.('').catch(() => {});
+        }
         setActiveCall(null);
         setSpeakerOn(false);
     }, []);

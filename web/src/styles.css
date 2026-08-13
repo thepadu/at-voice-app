@@ -1386,8 +1386,8 @@ textarea {
 }
 
 @keyframes call-screen-drop-in {
-    from { opacity: 0; transform: translate(-50%, -12px); }
-    to { opacity: 1; transform: translate(-50%, 0); }
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Extra-insistent variant for when the ringtone couldn't autoplay (no user

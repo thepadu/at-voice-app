@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useActiveCall } from '../../lib/activeCall';
 import { useToast } from '../../lib/toast';
-import { useModalA11y } from '../../lib/useModalA11y';
 
 type Agent = { id: number; name: string };
 
@@ -84,12 +83,23 @@ export default function TicketDrawer() {
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
     });
 
-    const containerRef = useModalA11y(quickTicketOpen, closeQuickTicket);
+    // Escape-to-close only, deliberately not the shared useModalA11y Tab-trap
+    // — this drawer has no backdrop and, like CallScreen itself, is meant to
+    // stay reachable-around, not sealed off: trapping Tab here would block a
+    // keyboard user from reaching the call's own Mute/Hold/End controls.
+    useEffect(() => {
+        if (!quickTicketOpen) return;
+        function handleKeyDown(e: KeyboardEvent) {
+            if (e.key === 'Escape') closeQuickTicket();
+        }
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [quickTicketOpen, closeQuickTicket]);
 
     if (!quickTicketOpen || !call) return null;
 
     return (
-        <div ref={containerRef} className="ticket-drawer" role="dialog" aria-label="Tickets for this call">
+        <div className="ticket-drawer" role="dialog" aria-label="Tickets for this call">
             <div className="ticket-drawer-header">
                 <h4>Tickets for {call.caller}</h4>
                 <button className="btn-icon" onClick={closeQuickTicket} aria-label="Close ticket drawer">
