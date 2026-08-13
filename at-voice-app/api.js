@@ -163,11 +163,22 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             missed: isMissed(row)
         }));
 
-        if (tab === 'incoming') calls = calls.filter(row => classifyDirection(row) === 'incoming');
+        // classifyDirection() calls anything that isn't an explicit Outbound
+        // row "incoming" — which includes abandoned/forwarded/after-hours
+        // rows, since those never got an Outbound leg either. Left alone,
+        // that makes "Incoming" nearly identical to "All" (everything minus
+        // outbound) instead of just the calls an agent actually answered, so
+        // every tab here also excludes/requires isMissed to keep the three
+        // tabs a true, non-overlapping partition of "All".
+        if (tab === 'incoming') calls = calls.filter(row => classifyDirection(row) === 'incoming' && !isMissed(row));
         if (tab === 'outgoing') calls = calls.filter(row => classifyDirection(row) === 'outgoing');
 
         if (tab === 'missed') {
-            calls = calls.filter(isMissed);
+            // Also requires 'incoming' so a failed *outbound* dial (which
+            // gets status 'failed' too, see finishOutboundCall in the ARI
+            // app) shows up only in Outgoing, not double-counted here as a
+            // missed inbound call.
+            calls = calls.filter(row => isMissed(row) && classifyDirection(row) === 'incoming');
 
             // Tells the agent at a glance whether this caller has already
             // been called back — derived from the data itself (any later
@@ -193,9 +204,12 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             deposit: calls.filter(c => c.option_pressed === '2').length,
             agentRequests: calls.filter(c => c.option_pressed === '3').length,
             outbound: calls.filter(c => classifyDirection(c) === 'outgoing').length,
-            missed: calls.filter(isMissed).length,
+            // Inbound-only, same reasoning as the missed-tab filter above —
+            // a failed outbound dial shouldn't inflate this into counting
+            // calls Chumz placed as calls Chumz "missed".
+            missed: calls.filter(c => isMissed(c) && classifyDirection(c) === 'incoming').length,
             missedByReason: {
-                abandoned: calls.filter(c => c.status === 'failed').length,
+                abandoned: calls.filter(c => c.status === 'failed' && classifyDirection(c) === 'incoming').length,
                 forwarded: calls.filter(c => c.status === 'forwarded').length,
                 afterHours: calls.filter(c => c.status === 'after_hours').length
             }
