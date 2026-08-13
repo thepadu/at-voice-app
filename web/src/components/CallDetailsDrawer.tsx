@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import { useModalA11y } from '../lib/useModalA11y';
+import { TICKET_STATUS_COLORS } from '../lib/ticketStatus';
 import StatusPill from './StatusPill';
 
 type Call = {
@@ -23,16 +24,6 @@ type Ticket = {
     created_at: string;
 };
 
-// Tickets use a different (capitalized) status vocabulary than call_logs —
-// kept separate from StatusPill's map rather than forcing a case-insensitive
-// lookup there, since the two vocabularies aren't actually the same concept.
-const TICKET_STATUS_COLORS: Record<string, string> = {
-    Open: '#EF5350',
-    'Follow-up needed': '#F39C12',
-    Escalated: '#F39C12',
-    Resolved: '#17A697',
-    'No resolution': '#757575'
-};
 
 export default function CallDetailsDrawer({ call, onClose }: { call: Call | null; onClose: () => void }) {
     const containerRef = useModalA11y(!!call, onClose);

@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useActiveCall } from '../../lib/activeCall';
 import { useToast } from '../../lib/toast';
+import { TICKET_STATUS_COLORS, TICKET_PRIORITIES } from '../../lib/ticketStatus';
 
 type Agent = { id: number; name: string };
 
@@ -15,17 +16,6 @@ type Ticket = {
     notes: string | null;
     assigned_agent_name?: string | null;
     created_at: string;
-};
-
-// Tickets use a different (capitalized) status vocabulary than call_logs —
-// same map as CallDetailsDrawer, kept local since the two components don't
-// otherwise share code.
-const TICKET_STATUS_COLORS: Record<string, string> = {
-    Open: '#EF5350',
-    'Follow-up needed': '#F39C12',
-    Escalated: '#F39C12',
-    Resolved: '#17A697',
-    'No resolution': '#757575'
 };
 
 function errorMessage(err: unknown) {
@@ -136,7 +126,7 @@ export default function TicketDrawer() {
             <label>
                 Priority
                 <select value={priority} onChange={e => setPriority(e.target.value)}>
-                    {['Low', 'Medium', 'High', 'Urgent'].map(p => <option key={p} value={p}>{p}</option>)}
+                    {TICKET_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
             </label>
             <label>

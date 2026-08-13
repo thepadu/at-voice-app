@@ -978,6 +978,8 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             .range(rangeStart, rangeStart + pageSize - 1);
 
         if (req.query.session_id) query = query.eq('session_id', req.query.session_id);
+        if (req.query.status) query = query.eq('status', req.query.status);
+        if (req.query.tag) query = query.eq('tag', req.query.tag);
 
         const { data, error, count } = await query;
 

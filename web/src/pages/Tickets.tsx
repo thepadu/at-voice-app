@@ -4,8 +4,10 @@ import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
 import { useAuth } from '../lib/auth';
 import { useModalA11y } from '../lib/useModalA11y';
+import { TICKET_STATUS_COLORS, TICKET_PRIORITY_COLORS, TICKET_STATUSES, TICKET_PRIORITIES } from '../lib/ticketStatus';
 import Pagination from '../components/Pagination';
 import ConfirmDialog from '../components/ConfirmDialog';
+import StatusDropdown from '../components/StatusDropdown';
 
 type Call = {
     session_id: string;
@@ -29,8 +31,6 @@ type Ticket = {
 
 type Agent = { id: number; name: string };
 
-const PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
-
 function errorMessage(err: unknown) {
     return err instanceof Error ? err.message : 'Something went wrong';
 }
@@ -41,11 +41,27 @@ export default function Tickets() {
     const { isSupervisor } = useAuth();
 
     const [ticketsPage, setTicketsPage] = useState(1);
+    const [statusFilter, setStatusFilter] = useState('');
+    const [tagFilter, setTagFilter] = useState('');
+
+    function changeStatusFilter(value: string) {
+        setStatusFilter(value);
+        setTicketsPage(1);
+    }
+
+    function changeTagFilter(value: string) {
+        setTagFilter(value);
+        setTicketsPage(1);
+    }
+
+    const ticketsParams = new URLSearchParams({ page: String(ticketsPage), pageSize: '25' });
+    if (statusFilter) ticketsParams.set('status', statusFilter);
+    if (tagFilter) ticketsParams.set('tag', tagFilter);
 
     const { data: callsData } = useQuery({ queryKey: ['calls', 'recent'], queryFn: () => apiFetch('/api/calls') });
     const { data: ticketsData } = useQuery({
-        queryKey: ['tickets', ticketsPage],
-        queryFn: () => apiFetch(`/api/tickets?page=${ticketsPage}&pageSize=25`)
+        queryKey: ['tickets', ticketsPage, statusFilter, tagFilter],
+        queryFn: () => apiFetch(`/api/tickets?${ticketsParams.toString()}`)
     });
     const { data: tagsData } = useQuery({ queryKey: ['ticket-tags'], queryFn: () => apiFetch('/api/ticket-tags') });
     const { data: agentsData } = useQuery({ queryKey: ['agents-assignable'], queryFn: () => apiFetch('/api/agents/assignable') });
@@ -86,6 +102,19 @@ export default function Tickets() {
         onSuccess: () => {
             showToast('Ticket created');
             setSelectedCall(null);
+            queryClient.invalidateQueries({ queryKey: ['tickets'] });
+        },
+        onError: (err: unknown) => showToast(errorMessage(err), 'error')
+    });
+
+    // PATCH /api/tickets/:id has always existed, fully built and validated —
+    // this was just never wired up to anything, so a ticket's status could
+    // never actually change after creation anywhere in the app.
+    const updateTicket = useMutation({
+        mutationFn: ({ id, ...changes }: { id: number; status?: string; priority?: string }) =>
+            apiFetch(`/api/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(changes) }),
+        onSuccess: () => {
+            showToast('Ticket updated');
             queryClient.invalidateQueries({ queryKey: ['tickets'] });
         },
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
@@ -146,7 +175,19 @@ export default function Tickets() {
                 </div>
 
                 <div className="panel">
-                    <h3>Tickets</h3>
+                    <div className="panel-header">
+                        <h3>Tickets</h3>
+                        <div className="calls-filter-actions">
+                            <select value={statusFilter} onChange={e => changeStatusFilter(e.target.value)}>
+                                <option value="">All statuses</option>
+                                {TICKET_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <select value={tagFilter} onChange={e => changeTagFilter(e.target.value)}>
+                                <option value="">All tags</option>
+                                {tags.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                        </div>
+                    </div>
                     <table>
                         <thead>
                             <tr>
@@ -160,16 +201,26 @@ export default function Tickets() {
                         </thead>
                         <tbody>
                             {tickets.length === 0 && (
-                                <tr><td colSpan={6} className="empty">No tickets yet.</td></tr>
+                                <tr><td colSpan={6} className="empty">No tickets{statusFilter || tagFilter ? ' match these filters.' : ' yet.'}</td></tr>
                             )}
                             {tickets.map(t => (
                                 <tr key={t.id}>
                                     <td className="hint">TCK-{t.id}</td>
                                     <td>{t.caller_number ?? t.caller_name ?? '—'}</td>
                                     <td>{t.tag ?? '—'}</td>
-                                    <td>{t.priority}</td>
                                     <td>
-                                        <span className="status-pill" style={{ background: '#F39C12' }}>{t.status}</span>
+                                        <span className="ticket-priority">
+                                            <span className="ticket-priority-dot" style={{ background: TICKET_PRIORITY_COLORS[t.priority] ?? '#757575' }} />
+                                            {t.priority}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <StatusDropdown
+                                            value={t.status}
+                                            options={TICKET_STATUSES}
+                                            colors={TICKET_STATUS_COLORS}
+                                            onChange={status => updateTicket.mutate({ id: t.id, status })}
+                                        />
                                     </td>
                                     <td>{t.assigned_agent_name ?? '—'}</td>
                                 </tr>
@@ -220,7 +271,7 @@ export default function Tickets() {
                         <label>
                             Priority
                             <select value={priority} onChange={e => setPriority(e.target.value)}>
-                                {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+                                {TICKET_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                             </select>
                         </label>
                         <label>

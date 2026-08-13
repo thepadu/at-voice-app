@@ -50,6 +50,43 @@ function missedReason(status: string | null) {
     return 'Abandoned';
 }
 
+// The table above already scrolls horizontally on a phone (styles.css's
+// mobile table rules), but that's a "works, not delightful" fallback for a
+// 6-column layout on a 375px screen — this is the same data reshaped into a
+// stacked call-log card, the way a phone's native recents list looks. Shown
+// only below the 880px breakpoint (styles.css), the table only above it —
+// same underlying `calls` array, no tab-specific logic needed since every
+// tab already shares this exact column shape.
+function CallCard({ call, onOpenDetails, onCallBack }: { call: Call; onOpenDetails: () => void; onCallBack: (caller: string) => void }) {
+    return (
+        <div className="call-card">
+            <div className="call-card-top">
+                <DirectionIcon call={call} />
+                <span className="call-card-caller">{call.caller}</span>
+                <StatusPill value={call.status ?? 'unknown'} />
+            </div>
+            <div className="call-card-meta">
+                <span>{call.agent_name ?? '—'}</span>
+                <span>{new Date(call.created_at).toLocaleString()}</span>
+            </div>
+            {call.direction === 'outgoing' && <div className="hint call-card-caption">{call.duration ?? 0}s</div>}
+            {call.missed && <div className="hint call-card-caption">{missedReason(call.status)}</div>}
+            <div className="call-card-actions">
+                {call.missed && (
+                    <button
+                        className={call.called_back ? 'btn btn-callback-done' : 'btn btn-primary'}
+                        onClick={() => onCallBack(call.caller)}
+                        title={call.called_back ? 'Already called back — click to call again' : undefined}
+                    >
+                        {call.called_back ? '✓ Called back' : 'Call back'}
+                    </button>
+                )}
+                <DetailsButton onOpen={onOpenDetails} />
+            </div>
+        </div>
+    );
+}
+
 export default function Calls() {
     const [tab, setTab] = useState<Tab>('all');
     const [page, setPage] = useState(1);
@@ -94,6 +131,9 @@ export default function Calls() {
     const calls: Call[] = data?.calls ?? [];
     const total: number = data?.total ?? 0;
     const totalPages: number = data?.totalPages ?? 1;
+
+    const EMPTY_NOUN: Record<Tab, string> = { all: 'calls', incoming: 'incoming calls', outgoing: 'outgoing calls', missed: 'missed calls' };
+    const emptyMessage = `No ${EMPTY_NOUN[tab]}${filtersActive ? ' match these filters.' : tab === 'missed' ? ' outstanding.' : ' yet.'}`;
 
     // Routed through the same browser softphone as the dialer (placeCall
     // already handles its own "not registered" / "already on a call" /
@@ -141,136 +181,37 @@ export default function Calls() {
                 </div>
             </div>
 
-            {tab === 'all' && (
-                <div className="panel">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th></th>
-                                <th>Caller / Number</th>
-                                <th>Agent</th>
-                                <th>Status</th>
-                                <th>Time</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {calls.length === 0 && (
-                                <tr><td colSpan={6} className="empty">No calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
-                            )}
-                            {calls.map(call => (
-                                <tr key={call.session_id}>
-                                    <td><DirectionIcon call={call} /></td>
-                                    <td>{call.caller}</td>
-                                    <td>{call.agent_name ?? '—'}</td>
-                                    <td><StatusPill value={call.status ?? 'unknown'} /></td>
-                                    <td>{new Date(call.created_at).toLocaleString()}</td>
-                                    <td className="calls-row-actions"><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-                </div>
-            )}
-
-            {tab === 'incoming' && (
-                <div className="panel">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th></th>
-                                <th>Caller / Number</th>
-                                <th>Agent</th>
-                                <th>Status</th>
-                                <th>Time</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {calls.length === 0 && (
-                                <tr><td colSpan={6} className="empty">No incoming calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
-                            )}
-                            {calls.map(call => (
-                                <tr key={call.session_id}>
-                                    <td><DirectionIcon call={call} /></td>
-                                    <td>{call.caller}</td>
-                                    <td>{call.agent_name ?? '—'}</td>
-                                    <td><StatusPill value={call.status ?? 'unknown'} /></td>
-                                    <td>{new Date(call.created_at).toLocaleString()}</td>
-                                    <td className="calls-row-actions"><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-                </div>
-            )}
-
-            {tab === 'outgoing' && (
-                <div className="panel">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th></th>
-                                <th>Caller / Number</th>
-                                <th>Agent</th>
-                                <th>Status</th>
-                                <th>Time</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {calls.length === 0 && (
-                                <tr><td colSpan={6} className="empty">No outgoing calls{filtersActive ? ' match these filters.' : ' yet.'}</td></tr>
-                            )}
-                            {calls.map(call => (
-                                <tr key={call.session_id}>
-                                    <td><DirectionIcon call={call} /></td>
-                                    <td>{call.caller}</td>
-                                    <td>{call.agent_name ?? '—'}</td>
-                                    <td><StatusPill value={call.status ?? 'unknown'} /></td>
-                                    <td>
-                                        {new Date(call.created_at).toLocaleString()}
-                                        <div className="hint">{call.duration ?? 0}s</div>
-                                    </td>
-                                    <td className="calls-row-actions"><DetailsButton onOpen={() => setDetailsCall(call)} /></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-                </div>
-            )}
-
-            {tab === 'missed' && (
-                <div className="panel">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th></th>
-                                <th>Caller / Number</th>
-                                <th>Agent</th>
-                                <th>Status</th>
-                                <th>Time</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {calls.length === 0 && (
-                                <tr><td colSpan={6} className="empty">No missed calls{filtersActive ? ' match these filters.' : ' outstanding.'}</td></tr>
-                            )}
-                            {calls.map(call => (
-                                <tr key={call.session_id}>
-                                    <td><DirectionIcon call={call} /></td>
-                                    <td>{call.caller}</td>
-                                    <td>{call.agent_name ?? '—'}</td>
-                                    <td>
-                                        <StatusPill value={call.status ?? 'unknown'} />
-                                        <div className="hint">{missedReason(call.status)}</div>
-                                    </td>
-                                    <td>{new Date(call.created_at).toLocaleString()}</td>
-                                    <td className="calls-row-actions">
+            <div className="panel">
+                <table className="calls-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Caller / Number</th>
+                            <th>Agent</th>
+                            <th>Status</th>
+                            <th>Time</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {calls.length === 0 && (
+                            <tr><td colSpan={6} className="empty">{emptyMessage}</td></tr>
+                        )}
+                        {calls.map(call => (
+                            <tr key={call.session_id}>
+                                <td><DirectionIcon call={call} /></td>
+                                <td>{call.caller}</td>
+                                <td>{call.agent_name ?? '—'}</td>
+                                <td>
+                                    <StatusPill value={call.status ?? 'unknown'} />
+                                    {call.missed && <div className="hint">{missedReason(call.status)}</div>}
+                                </td>
+                                <td>
+                                    {new Date(call.created_at).toLocaleString()}
+                                    {call.direction === 'outgoing' && <div className="hint">{call.duration ?? 0}s</div>}
+                                </td>
+                                <td className="calls-row-actions">
+                                    {call.missed && (
                                         <button
                                             className={call.called_back ? 'btn btn-callback-done' : 'btn btn-primary'}
                                             onClick={() => callBack(call.caller)}
@@ -278,15 +219,23 @@ export default function Calls() {
                                         >
                                             {call.called_back ? '✓ Called back' : 'Call back'}
                                         </button>
-                                        <DetailsButton onOpen={() => setDetailsCall(call)} />
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+                                    )}
+                                    <DetailsButton onOpen={() => setDetailsCall(call)} />
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+
+                <div className="calls-mobile-list">
+                    {calls.length === 0 && <p className="empty">{emptyMessage}</p>}
+                    {calls.map(call => (
+                        <CallCard key={call.session_id} call={call} onOpenDetails={() => setDetailsCall(call)} onCallBack={callBack} />
+                    ))}
                 </div>
-            )}
+
+                <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
 
             <CallDetailsDrawer call={detailsCall} onClose={() => setDetailsCall(null)} />
         </div>

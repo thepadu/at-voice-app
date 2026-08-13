@@ -26,6 +26,7 @@ type SoftphoneContextValue = {
     audioOutputSupported: boolean;
     speakerOn: boolean;
     toggleSpeaker: () => Promise<void>;
+    micPermissionDenied: boolean;
 };
 
 const SoftphoneContext = createContext<SoftphoneContextValue>({
@@ -42,7 +43,8 @@ const SoftphoneContext = createContext<SoftphoneContextValue>({
     placeCall: async () => {},
     audioOutputSupported: false,
     speakerOn: false,
-    toggleSpeaker: async () => {}
+    toggleSpeaker: async () => {},
+    micPermissionDenied: false
 });
 
 // setSinkId() is a real method on HTMLMediaElement in Chrome/Edge but isn't
@@ -86,6 +88,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const [outgoingCall, setOutgoingCall] = useState<OutgoingCall | null>(null);
     const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
     const [speakerOn, setSpeakerOn] = useState(false);
+    const [micPermissionDenied, setMicPermissionDenied] = useState(false);
+    const hasSetAvailableRef = useRef(false);
+    const hasRequestedMicRef = useRef(false);
 
     const audioOutputSupported = typeof (window.HTMLMediaElement?.prototype as SinkableAudioElement)?.setSinkId === 'function';
 
@@ -301,6 +306,38 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         return () => clearInterval(interval);
     }, [registrationState]);
 
+    // Starts every session ready to take calls instead of requiring a manual
+    // status flip first — but only once the softphone has actually
+    // registered, not at raw login, since going 'available' before that
+    // would let the queue ring an agent whose browser can't receive the
+    // call yet. The ref guards against re-firing on every reconnect (a
+    // dropped WebSocket auto-recovering shouldn't silently undo a deliberate
+    // 'break').
+    useEffect(() => {
+        if (registrationState !== 'registered' || hasSetAvailableRef.current) return;
+        hasSetAvailableRef.current = true;
+        apiFetch('/api/agents/me/status', { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }).catch(() => {});
+    }, [registrationState]);
+
+    // Microphone permission was previously only ever requested at the exact
+    // moment of answering a real incoming call — the worst possible time to
+    // discover it's blocked, with a customer already waiting. Requesting it
+    // once here, right after registration, resolves the prompt (or reveals
+    // an already-blocked state) during a calm moment instead. The stream
+    // itself isn't needed — SIP.js acquires its own when a call is actually
+    // answered — this call exists purely to trigger/check the permission.
+    useEffect(() => {
+        if (registrationState !== 'registered' || hasRequestedMicRef.current) return;
+        hasRequestedMicRef.current = true;
+        navigator.mediaDevices
+            ?.getUserMedia({ audio: true })
+            .then(stream => {
+                stream.getTracks().forEach(track => track.stop());
+                setMicPermissionDenied(false);
+            })
+            .catch(() => setMicPermissionDenied(true));
+    }, [registrationState]);
+
     const answer = useCallback(async () => {
         if (!incomingCall) return;
         try {
@@ -473,7 +510,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 placeCall,
                 audioOutputSupported,
                 speakerOn,
-                toggleSpeaker
+                toggleSpeaker,
+                micPermissionDenied
             }}
         >
             {children}

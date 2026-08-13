@@ -79,17 +79,22 @@ export default function Dashboard() {
                     <div className="card-label">Total Calls</div>
                     <p>{summary?.total ?? '—'}</p>
                 </div>
-                <div className="card">
-                    <div className="card-label">Login Issues</div>
-                    <p>{summary?.login ?? '—'}</p>
-                </div>
-                <div className="card">
-                    <div className="card-label">Deposit Issues</div>
-                    <p>{summary?.deposit ?? '—'}</p>
-                </div>
-                <div className="card">
-                    <div className="card-label">Agent Requests</div>
-                    <p>{summary?.agentRequests ?? '—'}</p>
+                <div className="card card-multi">
+                    <div className="card-label">Contact Reasons</div>
+                    <div className="card-multi-stats">
+                        <div className="card-multi-stat">
+                            <span className="card-multi-value">{summary?.login ?? '—'}</span>
+                            <span className="card-multi-sublabel">Login</span>
+                        </div>
+                        <div className="card-multi-stat">
+                            <span className="card-multi-value">{summary?.deposit ?? '—'}</span>
+                            <span className="card-multi-sublabel">Deposit</span>
+                        </div>
+                        <div className="card-multi-stat">
+                            <span className="card-multi-value">{summary?.agentRequests ?? '—'}</span>
+                            <span className="card-multi-sublabel">Agent</span>
+                        </div>
+                    </div>
                 </div>
                 <div className="card">
                     <div className="card-label">Outgoing</div>

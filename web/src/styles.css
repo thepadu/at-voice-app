@@ -308,6 +308,18 @@ h1, h2, h3, h4 {
     font-family: inherit;
 }
 
+/* Persistent, not a toast — this needs to stay visible until the agent
+   actually fixes it in their browser settings, not disappear after a few
+   seconds like a normal notification would. */
+.mic-permission-banner {
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 20px;
+    text-align: center;
+}
+
 /* ── Cards / panels / tables ───────────────────────────────────────── */
 
 .cards {
@@ -338,6 +350,28 @@ h1, h2, h3, h4 {
     font-weight: 600;
 }
 
+.card-multi-stats {
+    display: flex;
+    gap: 14px;
+    margin-top: 8px;
+}
+
+.card-multi-stat {
+    display: flex;
+    flex-direction: column;
+}
+
+.card-multi-value {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.card-multi-sublabel {
+    font-size: 11px;
+    color: var(--muted);
+}
 
 .panel {
     background: var(--surface);
@@ -474,6 +508,58 @@ tr:not(:last-child) td {
     align-items: center;
     justify-content: flex-end;
     gap: 6px;
+}
+
+/* Hidden by default (desktop shows the table above) — swapped in under the
+   880px breakpoint, where a 6-column table forces heavy horizontal
+   scrolling even with that breakpoint's own overflow-x:auto fallback. A
+   stacked card per call reads the way a phone's native call log does. */
+.calls-mobile-list {
+    display: none;
+}
+
+.call-card {
+    padding: 12px 0;
+    border-top: 1px solid var(--border);
+}
+
+.call-card:first-child {
+    border-top: none;
+}
+
+.call-card-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.call-card-caller {
+    flex: 1;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.call-card-meta {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 6px;
+}
+
+.call-card-caption {
+    margin: 4px 0 0;
+}
+
+.call-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
@@ -1271,6 +1357,20 @@ textarea {
     color: var(--muted);
 }
 
+.ticket-priority {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.ticket-priority-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
 /* ── Settings page ────────────────────────────────────────────────── */
 
 .toggle-switch input {
@@ -1676,7 +1776,10 @@ textarea {
     }
 
     /* Tables keep their natural width and scroll horizontally inside the
-       panel instead of squeezing columns illegible or overflowing the page. */
+       panel instead of squeezing columns illegible or overflowing the page.
+       The Calls page swaps to a stacked card list instead (below) rather
+       than relying on this fallback, since horizontal scrolling a 6-column
+       table is functional but not what a phone call log should feel like. */
     .panel {
         overflow-x: auto;
     }
@@ -1684,6 +1787,14 @@ textarea {
     table {
         width: auto;
         min-width: 100%;
+    }
+
+    .calls-table {
+        display: none;
+    }
+
+    .calls-mobile-list {
+        display: block;
     }
 
     .ivr-layout {
@@ -1703,13 +1814,26 @@ textarea {
         padding: 20px;
     }
 
+    /* .call-screen (avatar, number, timer, controls) already eats most of a
+       phone's viewport on its own — stacking the ticket drawer below it in
+       this same fixed, flex-column container with no height limit pushed
+       the drawer partly or fully below the visible screen, with no way to
+       scroll to it (a `position: fixed` element isn't part of the page's
+       own scrollable flow). Capping the stack's own height and letting it
+       scroll as a unit fixes that without changing anything on desktop. */
     .call-screen-stack {
         top: calc(72px + env(safe-area-inset-top));
         width: calc(100vw - 24px);
+        max-height: calc(100vh - 88px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        overflow-y: auto;
     }
 
     .call-screen {
         padding: 22px 18px;
+    }
+
+    .ticket-drawer {
+        padding: 16px 18px;
     }
 
     /* Stacked in one right-aligned column instead of side-by-side, so

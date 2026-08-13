@@ -22,7 +22,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     // (ringing, dialing, or active) is the most important thing happening,
     // so the rest of the shell visually steps back for all three, not just
     // once a call is fully connected.
-    const { incomingCall, outgoingCall, activeCall: softphoneCall } = useSoftphone();
+    const { incomingCall, outgoingCall, activeCall: softphoneCall, micPermissionDenied } = useSoftphone();
     const { activeCall: polledCall } = useActiveCall();
     const onCall = !!(incomingCall || outgoingCall || softphoneCall?.remoteNumber || polledCall?.caller);
 
@@ -33,6 +33,12 @@ export default function Layout({ children }: { children: ReactNode }) {
             <CallScreen />
             <div className="app-shell-main">
                 <Topbar onMenuClick={() => setSidebarOpen(o => !o)} />
+                {micPermissionDenied && (
+                    <div className="mic-permission-banner">
+                        Microphone access is blocked — you won't be able to answer calls until it's allowed in this
+                        browser's site settings.
+                    </div>
+                )}
                 <main className="app-content">{children}</main>
             </div>
             <LiveAnalyticsBadge />
