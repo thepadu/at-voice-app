@@ -1,4 +1,4 @@
-const { isValidE164 } = require('./lib/phone');
+const { isValidE164, normalizePhone } = require('./lib/phone');
 const { invalidateAgentCache } = require('./lib/agentCache');
 const { placeCall } = require('./lib/voice');
 
@@ -27,8 +27,13 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // than a SQL join — the agents table is tiny.
     async function attachAgentNames(rows) {
         const { data: agentRows } = await supabase.from('agents').select('phone, name');
-        const nameByPhone = new Map((agentRows || []).map(a => [a.phone, a.name]));
-        return rows.map(row => ({ ...row, agent_name: row.agent_number ? nameByPhone.get(row.agent_number) ?? null : null }));
+        // agent_number isn't stored consistently — the softphone flow keeps
+        // agents.phone's leading +, the legacy Africa's Talking flow strips
+        // it (app.js's normalizePhone) — so both sides are normalized to the
+        // same no-plus form here rather than matched as-is, which only ever
+        // matched the softphone case.
+        const nameByPhone = new Map((agentRows || []).map(a => [normalizePhone(a.phone), a.name]));
+        return rows.map(row => ({ ...row, agent_name: row.agent_number ? nameByPhone.get(normalizePhone(row.agent_number)) ?? null : null }));
     }
 
     // Best-effort direction classification. IVR-originated rows often don't
@@ -294,8 +299,17 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // caught: always returned {call: null}, so the calls-by-hour chart
     // (Dashboard and Analytics) was permanently empty.
     app.get('/api/calls/by-hour', requireAuth, async (req, res) => {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
+        // setHours()/getHours() run in the server's own timezone (UTC on
+        // Render), not Nairobi's — shifting every bucket by however far off
+        // that is and misattributing the hours right around Nairobi midnight
+        // to the wrong calendar day. ari-app's isWithinBusinessHours has the
+        // exact same hazard and solves it the same way: manually apply the
+        // EAT offset (Nairobi has no DST, always UTC+3) and read back with
+        // the UTC getters instead of trusting the process's local time.
+        const EAT_OFFSET_MS = 3 * 60 * 60 * 1000;
+        const nairobiNow = new Date(Date.now() + EAT_OFFSET_MS);
+        const startOfDayNairobi = Date.UTC(nairobiNow.getUTCFullYear(), nairobiNow.getUTCMonth(), nairobiNow.getUTCDate());
+        const startOfDay = new Date(startOfDayNairobi - EAT_OFFSET_MS);
 
         const { data, error } = await supabase
             .from('call_logs')
@@ -309,7 +323,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
 
         const hourCounts = new Array(24).fill(0);
         data.forEach(row => {
-            const hour = new Date(row.created_at).getHours();
+            const hour = new Date(new Date(row.created_at).getTime() + EAT_OFFSET_MS).getUTCHours();
             hourCounts[hour]++;
         });
 
@@ -403,7 +417,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
 
         const [{ data: callData, error: callError }, { data: agentRows, error: agentError }] = await Promise.all([
-            supabase.from('call_logs').select('agent_number, status, duration').not('agent_number', 'is', null),
+            supabase.from('call_logs').select('agent_number, status, duration, direction').not('agent_number', 'is', null),
             supabase.from('agents').select('id, name, phone')
         ]);
 
@@ -412,22 +426,34 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(500).json({ error: 'Failed to load agent stats' });
         }
 
-        const nameByPhone = new Map(agentRows.map(a => [a.phone, a]));
+        // agent_number isn't stored consistently — the softphone flow keeps
+        // agents.phone's leading +, the legacy Africa's Talking flow strips
+        // it (app.js's normalizePhone) — so both sides are normalized to the
+        // same no-plus form for keying/lookup here. Without this, a legacy
+        // agent's calls landed in their own "Unknown agent" bucket instead
+        // of merging into that agent's real leaderboard row.
+        const nameByPhone = new Map(agentRows.map(a => [normalizePhone(a.phone), a]));
 
         const stats = {};
         callData.forEach(row => {
-            const key = row.agent_number;
+            const key = normalizePhone(row.agent_number);
             if (!stats[key]) stats[key] = { phone: key, total: 0, answered: 0, missed: 0, durationSum: 0 };
             stats[key].total++;
             if (row.status === 'completed') {
                 stats[key].answered++;
                 stats[key].durationSum += row.duration || 0;
-            } else if (isMissed(row)) {
+            } else if (isMissed(row) && classifyDirection(row) === 'incoming') {
                 // Matches GET /api/calls' definition exactly — these two
                 // endpoints previously disagreed (this one also excluded
                 // 'forwarded'/'after_hours' and included the now-unused
                 // 'unknown'), which would have made any missed-call chart
-                // built from both sources visibly inconsistent.
+                // built from both sources visibly inconsistent. The direction
+                // check matters here specifically: an agent's own failed
+                // outbound callback (e.g. clicking "Call back" on a missed
+                // call and the customer not answering) has agent_number set
+                // and status 'failed' too — without this, it inflated that
+                // agent's missed count with calls they placed, not calls
+                // they failed to answer.
                 stats[key].missed++;
             }
         });
@@ -546,10 +572,16 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.json({ call: null, agentStatus: null });
         }
 
+        // agent_number isn't stored consistently: the softphone flow writes
+        // agents.phone as-is (with its leading +), but the legacy Africa's
+        // Talking flow runs it through normalizePhone() first, which strips
+        // it (app.js). Matching only agent.phone directly left every legacy
+        // agent's active-call/wrap-up/add-party detection unable to ever
+        // find their own in-progress call.
         const { data: call } = await supabase
             .from('call_logs')
             .select('*')
-            .eq('agent_number', agent.phone)
+            .in('agent_number', [agent.phone, normalizePhone(agent.phone)])
             .eq('status', 'ongoing')
             .order('created_at', { ascending: false })
             .limit(1)
@@ -579,10 +611,13 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(404).json({ error: 'Agent not found' });
         }
 
+        // See the matching comment on GET /api/agents/me/active-call above —
+        // agent_number can be stored with or without the leading + depending
+        // on which call flow wrote it.
         const { data: call } = await supabase
             .from('call_logs')
             .select('session_id, add_party_status')
-            .eq('agent_number', agent.phone)
+            .in('agent_number', [agent.phone, normalizePhone(agent.phone)])
             .eq('status', 'ongoing')
             .order('created_at', { ascending: false })
             .limit(1)
@@ -1001,6 +1036,10 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         const validStatuses = ['Open', 'Resolved', 'Escalated', 'Follow-up needed', 'No resolution'];
         if (status !== undefined && !validStatuses.includes(status)) {
             return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        if (priority !== undefined && !['Low', 'Medium', 'High', 'Urgent'].includes(priority)) {
+            return res.status(400).json({ error: 'Invalid priority' });
         }
 
         const updates = {};
