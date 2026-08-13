@@ -15,6 +15,7 @@ process.on('uncaughtException', err => {
     process.exit(1);
 });
 
+const crypto = require('crypto');
 const ari = require('ari-client');
 const { normalizePhone } = require('./lib/phone');
 const { synthesize, invalidate } = require('./tts');
@@ -290,8 +291,26 @@ async function dequeueNext() {
     await Promise.all(
         agents.map(async agent => {
             await setAgentStatus(agent.id, 'ringing');
+            // Same reasoning as ringGroupBySessionId above, applied to the
+            // per-channel map: Asterisk's StasisStart event (over the
+            // separate WebSocket) and this originate() call's HTTP response
+            // travel independently with no guaranteed ordering. Populating
+            // agentLegBySessionId only after originate() resolved meant a
+            // StasisStart that won that race found nothing here, hung the
+            // agent channel up, and — critically — never re-queued the
+            // customer, stranding them on hold with nothing left to ever
+            // dequeue them again. Pre-assigning the channel ID lets this be
+            // registered before the request is even sent.
+            const channelId = `agent-leg-${crypto.randomUUID()}`;
+            agentLegBySessionId.set(channelId, {
+                channel: waiting.channel,
+                sessionId: waiting.sessionId,
+                agentId: agent.id,
+                bridge: waiting.bridge
+            });
             try {
                 const agentChannel = await client.channels.originate({
+                    channelId,
                     endpoint: `PJSIP/${agent.agent_sip_credentials.sip_username}`,
                     app: APP_NAME,
                     appArgs: `agent-leg:${agent.id}:${waiting.sessionId}`,
@@ -302,14 +321,9 @@ async function dequeueNext() {
                     callerId: customerNumber,
                     timeout: 25
                 });
-                agentLegBySessionId.set(agentChannel.id, {
-                    channel: waiting.channel,
-                    sessionId: waiting.sessionId,
-                    agentId: agent.id,
-                    bridge: waiting.bridge
-                });
                 ringGroup.push({ channel: agentChannel, agentId: agent.id });
             } catch (err) {
+                agentLegBySessionId.delete(channelId);
                 console.error(`❌ Failed to ring agent ${agent.id}:`, err.message);
                 await setAgentStatus(agent.id, 'available');
             }
