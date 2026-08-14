@@ -1,3 +1,5 @@
+import { isCallInProgress } from './callState';
+
 export class ApiError extends Error {
     status: number;
 
@@ -18,7 +20,13 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
     });
 
     if (res.status === 401) {
-        window.location.href = '/login';
+        // A silent background call (the softphone heartbeat, an active-call
+        // poll, any refetchInterval query) 401ing mid-call shouldn't yank
+        // the whole page away to /login — indistinguishable from "connection
+        // lost" to the agent, for a completely unrelated reason. Skipping
+        // the redirect here is self-healing: the next call once the call
+        // actually ends will 401 again and redirect normally then.
+        if (!isCallInProgress()) window.location.href = '/login';
         throw new ApiError(401, 'Not authenticated');
     }
 

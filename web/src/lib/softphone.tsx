@@ -4,6 +4,7 @@ import type { Invitation, Session } from 'sip.js';
 import { apiFetch } from './api';
 import { useAuth } from './auth';
 import { useToast } from './toast';
+import { setCallInProgress } from './callState';
 
 export type RegistrationState = 'unregistered' | 'registering' | 'registered' | 'failed';
 
@@ -106,6 +107,15 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     // it doesn't assume the old transport is salvageable.
     const [reconnectNonce, setReconnectNonce] = useState(0);
     const reconnectDelayMsRef = useRef(1000);
+
+    // Single source of truth for "is this agent mid-call right now" — kept
+    // in sync here since incomingCall/outgoingCall/activeCall all live in
+    // this hook, and consumed by api.ts (a plain function, not a hook) to
+    // avoid force-redirecting an agent to /login mid-call over an unrelated
+    // background 401. See callState.ts for the full reasoning.
+    useEffect(() => {
+        setCallInProgress(!!(incomingCall || outgoingCall || activeCall));
+    }, [incomingCall, outgoingCall, activeCall]);
     const [micPermissionDenied, setMicPermissionDenied] = useState(false);
     const hasSetAvailableRef = useRef(false);
     const hasRequestedMicRef = useRef(false);

@@ -1,5 +1,15 @@
+const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
+
+// 24h instead of a flat 7 days — shrinks the blast radius of a leaked
+// cookie considerably. Sliding rather than fixed so a genuinely active
+// agent's session never actually expires mid-shift: requireAuth below
+// re-issues a fresh 24h token once an hour of real activity has passed,
+// so only a session with nobody actively using it for a full day actually
+// dies on schedule.
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const SESSION_REFRESH_AFTER_MS = 60 * 60 * 1000;
 
 module.exports = function (app, supabase) {
 
@@ -8,6 +18,21 @@ module.exports = function (app, supabase) {
         process.env.GOOGLE_CLIENT_SECRET,
         process.env.GOOGLE_CALLBACK_URL
     );
+
+    // Shared by the initial login and every sliding-session refresh in
+    // requireAuth below, so the token shape and cookie settings can't drift
+    // out of sync between the two.
+    function issueSession(res, { email, name, role, agentId }) {
+        const sessionToken = jwt.sign({ email, name, role, agentId }, process.env.JWT_SECRET, {
+            expiresIn: Math.floor(SESSION_TTL_MS / 1000)
+        });
+        res.cookie('session', sessionToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax',
+            maxAge: SESSION_TTL_MS
+        });
+    }
 
     // Login is open to ANY Google account — no domain or allowlist check.
     // This was a deliberate choice (confirmed 2026-08-05), not an oversight:
@@ -148,6 +173,12 @@ module.exports = function (app, supabase) {
                     font-size: 14px;
                     margin: 0 0 28px;
                 }
+                .form-note {
+                    color: #94a3b8;
+                    font-size: 12px;
+                    margin: 16px 0 0;
+                    line-height: 1.5;
+                }
                 a.btn {
                     display: flex;
                     align-items: center;
@@ -196,6 +227,7 @@ module.exports = function (app, supabase) {
                             <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/><path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.11-7.45 2.11-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.69 28.19A13.9 13.9 0 0 1 10.94 24c0-1.45.25-2.86.7-4.19v-5.7H4.34A22.9 22.9 0 0 0 2 24c0 3.72.89 7.23 2.34 10.19l7.35-5.7z"/><path fill="#EA4335" d="M24 10.75c3.23 0 6.14 1.11 8.42 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 13.81l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/></svg>
                             Sign in with Google
                         </a>
+                        <p class="form-note">Installed Chumz to your home screen? Re-open it from there after signing in.</p>
                     </div>
                 </div>
             </div>
@@ -212,14 +244,35 @@ module.exports = function (app, supabase) {
             );
         }
 
+        // CSRF protection for the OAuth flow — without a state param tied
+        // to this specific browser, nothing stops a callback request from
+        // being replayed/forged against a different session. Short-lived
+        // (10 min, comfortably longer than anyone takes to click through
+        // Google's consent screen) and cleared on the callback either way.
+        const state = crypto.randomBytes(16).toString('hex');
+        res.cookie('oauth_state', state, {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax',
+            maxAge: 10 * 60 * 1000
+        });
+
         const url = client.generateAuthUrl({
             scope: ['profile', 'email'],
-            prompt: 'select_account'
+            prompt: 'select_account',
+            state
         });
         res.redirect(url);
     });
 
     app.get('/auth/google/callback', async (req, res) => {
+        const expectedState = req.cookies.oauth_state;
+        res.clearCookie('oauth_state');
+
+        if (!req.query.state || !expectedState || req.query.state !== expectedState) {
+            return res.status(403).send('This login attempt could not be verified — please try signing in again.');
+        }
+
         try {
             const { tokens } = await client.getToken(req.query.code);
             const ticket = await client.verifyIdToken({
@@ -287,18 +340,7 @@ module.exports = function (app, supabase) {
 
             const role = agent?.role === 'supervisor' ? 'supervisor' : 'agent';
 
-            const sessionToken = jwt.sign(
-                { email: loginEmail, name: payload.name, role, agentId: agent?.id ?? null },
-                process.env.JWT_SECRET,
-                { expiresIn: '7d' }
-            );
-
-            res.cookie('session', sessionToken, {
-                httpOnly: true,
-                secure: true,
-                sameSite: 'lax',
-                maxAge: 7 * 24 * 60 * 60 * 1000
-            });
+            issueSession(res, { email: loginEmail, name: payload.name, role, agentId: agent?.id ?? null });
 
             res.redirect('/app');
         } catch (error) {
@@ -317,7 +359,18 @@ module.exports = function (app, supabase) {
     // fetch() call has no browser chrome to redirect.
     function requireAuth(req, res, next) {
         try {
-            req.user = jwt.verify(req.cookies.session, process.env.JWT_SECRET);
+            const payload = jwt.verify(req.cookies.session, process.env.JWT_SECRET);
+            req.user = payload;
+
+            // Sliding session: a genuinely active agent re-issues a fresh
+            // 24h token roughly once an hour, so a long shift never
+            // actually hits the expiry wall — only a session nobody's
+            // touched for a full day does. `iat` is in seconds, everything
+            // else here is milliseconds.
+            if (Date.now() - payload.iat * 1000 > SESSION_REFRESH_AFTER_MS) {
+                issueSession(res, { email: payload.email, name: payload.name, role: payload.role, agentId: payload.agentId });
+            }
+
             next();
         } catch {
             if (req.path.startsWith('/api/')) {
