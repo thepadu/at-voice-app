@@ -515,6 +515,17 @@ tr:not(:last-child) td {
     gap: 6px;
 }
 
+/* A caption sitting directly under a StatusPill or timestamp in the same
+   table cell (or mobile call card) — deliberately NOT .hint, whose
+   -6px top margin is tuned for tucking hint text under a form label and
+   pulled this caption up into visible overlap with the element above it
+   when reused here instead. */
+.calls-row-caption {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 2px 0 0;
+}
+
 /* Hidden by default (desktop shows the table above) — swapped in under the
    880px breakpoint, where a 6-column table forces heavy horizontal
    scrolling even with that breakpoint's own overflow-x:auto fallback. A
@@ -553,10 +564,6 @@ tr:not(:last-child) td {
     color: var(--muted);
     font-size: 12px;
     margin-top: 6px;
-}
-
-.call-card-caption {
-    margin: 4px 0 0;
 }
 
 .call-card-actions {
@@ -1085,11 +1092,17 @@ textarea {
     to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
+.dialer-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
 .dialer-popover-title {
     font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 700;
     font-size: 13px;
-    margin-bottom: 10px;
 }
 
 .dialer-display-row {

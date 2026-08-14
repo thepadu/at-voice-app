@@ -69,8 +69,8 @@ function CallCard({ call, onOpenDetails, onCallBack }: { call: Call; onOpenDetai
                 <span>{call.agent_name ?? '—'}</span>
                 <span>{new Date(call.created_at).toLocaleString()}</span>
             </div>
-            {call.direction === 'outgoing' && <div className="hint call-card-caption">{call.duration ?? 0}s</div>}
-            {call.missed && <div className="hint call-card-caption">{missedReason(call.status)}</div>}
+            {call.direction === 'outgoing' && <div className="calls-row-caption">{call.duration ?? 0}s</div>}
+            {call.missed && <div className="calls-row-caption">{missedReason(call.status)}</div>}
             <div className="call-card-actions">
                 {call.missed && (
                     <button
@@ -204,11 +204,11 @@ export default function Calls() {
                                 <td>{call.agent_name ?? '—'}</td>
                                 <td>
                                     <StatusPill value={call.status ?? 'unknown'} />
-                                    {call.missed && <div className="hint">{missedReason(call.status)}</div>}
+                                    {call.missed && <div className="calls-row-caption">{missedReason(call.status)}</div>}
                                 </td>
                                 <td>
                                     {new Date(call.created_at).toLocaleString()}
-                                    {call.direction === 'outgoing' && <div className="hint">{call.duration ?? 0}s</div>}
+                                    {call.direction === 'outgoing' && <div className="calls-row-caption">{call.duration ?? 0}s</div>}
                                 </td>
                                 <td className="calls-row-actions">
                                     {call.missed && (

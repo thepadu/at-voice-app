@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Phone, Delete } from 'lucide-react';
+import { Phone, Delete, X } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { useSoftphone } from '../../lib/softphone';
@@ -84,7 +84,12 @@ export default function FloatingDialer() {
         <div className="floating-dialer">
             {open && (
                 <div className="dialer-popover dialer-popover-open">
-                    <div className="dialer-popover-title">Dialer</div>
+                    <div className="dialer-popover-header">
+                        <div className="dialer-popover-title">Dialer</div>
+                        <button className="btn-icon" onClick={() => setOpen(false)} aria-label="Close dialer" type="button">
+                            <X size={16} />
+                        </button>
+                    </div>
                     <div className="dialer-display-row">
                         <button className="dialer-country-code" onClick={insertCountryCode} title="Insert +254" type="button">
                             +254
