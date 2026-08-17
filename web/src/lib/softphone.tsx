@@ -445,6 +445,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             await incomingCall.session.accept({
                 sessionDescriptionHandlerOptions: { constraints: { audio: CALL_AUDIO_CONSTRAINTS, video: false } }
             });
+            // A successful accept() just proved the mic actually works —
+            // clears a stale "blocked" banner left over from the proactive
+            // post-registration check, which never re-checks on its own.
+            setMicPermissionDenied(false);
         } catch {
             showToast('Could not answer — check microphone permissions', 'error');
             incomingCall.session.reject().catch(() => {});
@@ -587,6 +591,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
             try {
                 await inviter.invite({ sessionDescriptionHandlerOptions: { constraints: { audio: CALL_AUDIO_CONSTRAINTS, video: false } } });
+                // Same reasoning as answer() — a successful invite() proves the
+                // mic works, so clear any stale "blocked" banner.
+                setMicPermissionDenied(false);
             } catch {
                 showToast('Call failed', 'error');
                 setOutgoingCall(current => (current?.session === inviter ? null : current));
