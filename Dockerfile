@@ -3,14 +3,14 @@
 # path (see at-voice-app/app.js's express.static mount), so the runtime
 # image only needs the API's own production dependencies.
 
-FROM node:20-alpine AS web-build
+FROM node:22-alpine AS web-build
 WORKDIR /repo/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /repo/at-voice-app
 COPY at-voice-app/package*.json ./
 RUN npm ci --omit=dev
