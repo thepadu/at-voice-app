@@ -49,7 +49,38 @@ const { requireAuth, requireSupervisor } = authRoutes(app, supabase);
 
 const STANDBY_TIMEOUT = 30;
 const QUEUE_NAME = 'support-queue';
-const BASE_URL = 'https://at-voice-app.onrender.com';
+// Stale across the Render->DO migration once already (this hardcoded value
+// used to be the old onrender.com URL) — an env var this time so the next
+// domain change doesn't silently break the non-SIP agent standby loop again.
+const BASE_URL = process.env.BASE_URL || 'https://calls.chumz.online';
+
+// None of /voice, /agent-standby, /agent-standby-input, /events run through
+// requireAuth — they're Africa's Talking's own webhook callbacks, which
+// can't carry an agent's session cookie. Without any check at all, though,
+// they're wide open: /agent-standby-input's agentId is a small guessable
+// integer, and hitting it directly flips that agent to on_call and marks
+// the oldest genuinely-waiting customer's call_logs row 'ongoing' — making
+// them silently vanish from the Live Queue dashboard while still actually
+// waiting. Opt-in (not enforced until the env var is set) because these
+// URLs are registered as static callback URLs in Africa's Talking's own
+// dashboard — turning this on requires adding `?secret=...` there too,
+// which isn't something this code can do on its own.
+const AT_WEBHOOK_SECRET = process.env.AT_WEBHOOK_SECRET;
+function verifyAtWebhookSecret(req, res, next) {
+    if (!AT_WEBHOOK_SECRET) {
+        console.warn(`⚠️  AT_WEBHOOK_SECRET not set — ${req.path} is reachable without authentication`);
+        return next();
+    }
+    if (req.query.secret !== AT_WEBHOOK_SECRET) {
+        return res.status(403).send('Forbidden');
+    }
+    next();
+}
+// Appended to every URL this app itself generates for Africa's Talking to
+// call back into (the standby loop's own redirects) — the one URL it can't
+// cover is /voice itself, since that's the static callback registered
+// directly in Africa's Talking's dashboard, not something built here.
+const secretParam = AT_WEBHOOK_SECRET ? `&secret=${AT_WEBHOOK_SECRET}` : '';
 
 // Routes
 apiRoutes(app, supabase, requireAuth, requireSupervisor);
@@ -88,7 +119,7 @@ app.get('/dashboard', (req, res) => {
 // an agent in this loop will always hear "No calls waiting." Left in place
 // since ripping it out entirely means deciding what a non-SIP agent going
 // "available" should do instead — a product decision, not a cleanup one.
-app.post('/voice', (req, res) => {
+app.post('/voice', verifyAtWebhookSecret, (req, res) => {
     res.set('Content-Type', 'application/xml');
 
     const standbyMatch = /^agent-standby:(\d+)$/.exec(req.body.clientRequestId || '');
@@ -96,7 +127,7 @@ app.post('/voice', (req, res) => {
     if (standbyMatch) {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
-                `<Redirect>${BASE_URL}/agent-standby?agentId=${standbyMatch[1]}</Redirect>` +
+                `<Redirect>${BASE_URL}/agent-standby?agentId=${standbyMatch[1]}${secretParam}</Redirect>` +
             '</Response>');
     }
 
@@ -110,7 +141,7 @@ app.post('/voice', (req, res) => {
 // listening for a digit press, which is the only way to trigger a Dequeue
 // (Africa's Talking has no API to inject new instructions into a live call
 // from our server — the trigger must come from inside the call itself).
-app.post('/agent-standby', async (req, res) => {
+app.post('/agent-standby', verifyAtWebhookSecret, async (req, res) => {
     const agentId = req.query.agentId;
 
     await supabase.from('agents').update({ status: 'available' }).eq('id', agentId);
@@ -119,14 +150,14 @@ app.post('/agent-standby', async (req, res) => {
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
             '<Say>You are now online for Chumz support calls.</Say>' +
-            `<GetDigits timeout="${STANDBY_TIMEOUT}" numDigits="1" callbackUrl="${BASE_URL}/agent-standby-input?agentId=${agentId}">` +
+            `<GetDigits timeout="${STANDBY_TIMEOUT}" numDigits="1" callbackUrl="${BASE_URL}/agent-standby-input?agentId=${agentId}${secretParam}">` +
                 '<Say>Press 1 to check for a waiting call.</Say>' +
             '</GetDigits>' +
-            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}</Redirect>` +
+            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}${secretParam}</Redirect>` +
         '</Response>');
 });
 
-app.post('/agent-standby-input', async (req, res) => {
+app.post('/agent-standby-input', verifyAtWebhookSecret, async (req, res) => {
     const agentId = req.query.agentId;
 
     res.set('Content-Type', 'application/xml');
@@ -163,20 +194,20 @@ app.post('/agent-standby-input', async (req, res) => {
         return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
             '<Response>' +
                 `<Dequeue name="${QUEUE_NAME}"/>` +
-                `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}</Redirect>` +
+                `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}${secretParam}</Redirect>` +
             '</Response>');
     }
 
     res.send('<?xml version="1.0" encoding="UTF-8"?>' +
         '<Response>' +
             '<Say>No calls waiting right now.</Say>' +
-            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}</Redirect>` +
+            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}${secretParam}</Redirect>` +
         '</Response>');
 });
 
 
 // 🔹 EVENTS CALLBACK (UPSERT)
-app.post('/events', async (req, res) => {
+app.post('/events', verifyAtWebhookSecret, async (req, res) => {
     console.log('📡 EVENT:', req.body);
 
     const {
@@ -254,6 +285,24 @@ app.get(['/app', '/app/*'], (req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
+});
+
+// DO App Platform sends SIGTERM on every redeploy/restart. Without this, a
+// request in flight at that exact instant (an agent action, an AT /events
+// callback) gets hard-killed mid-response instead of finishing normally —
+// server.close() stops accepting new connections but lets in-flight ones
+// complete; the timeout is a backstop against a request that never finishes
+// on its own, so a deploy can't hang indefinitely waiting to exit.
+process.on('SIGTERM', () => {
+    console.log('⏳ SIGTERM received, closing server gracefully…');
+    server.close(() => {
+        console.log('✅ Server closed, exiting');
+        process.exit(0);
+    });
+    setTimeout(() => {
+        console.error('⚠️ Graceful shutdown timed out, forcing exit');
+        process.exit(1);
+    }, 10000).unref();
 });

@@ -113,7 +113,27 @@ async function playText(channel, text, voiceOpts) {
     // no await and nothing else referencing this promise, that was an
     // unhandled rejection every time a caller hung up mid-greeting/menu.
     channel.play({ media: `sound:${soundName}` }, playback).catch(() => {});
-    const finished = await new Promise(resolve => playback.once('PlaybackFinished', (event, pb) => resolve(pb)));
+
+    // Races against the channel's own StasisEnd: per the comment above, if
+    // the caller hangs up right as channel.play() reaches Asterisk, no
+    // Playback is ever actually created and PlaybackFinished never fires.
+    // Several call sites (the queue-timeout apology, forwarding/message
+    // prompts, the after-hours message) await this with no competing
+    // timeout of their own — without this race, a hangup at exactly that
+    // moment hung the calling function forever and permanently leaked a
+    // listener on the shared `client` EventEmitter.
+    const finished = await new Promise(resolve => {
+        const onFinished = (event, pb) => {
+            channel.removeListener('StasisEnd', onHangup);
+            resolve(pb);
+        };
+        const onHangup = () => {
+            playback.removeListener('PlaybackFinished', onFinished);
+            resolve(null);
+        };
+        playback.once('PlaybackFinished', onFinished);
+        channel.once('StasisEnd', onHangup);
+    });
 
     // A garbled/corrupt cached synthesis (Piper/sox occasionally produce one
     // despite exiting 0 — see tts.js) doesn't reject channel.play() or stop
@@ -622,8 +642,12 @@ async function runRatingIvr(customerChannel, sessionId, voiceOpts) {
 // ARI channel names look like "PJSIP/simon-00000123" — the part between the
 // slash and the trailing dash is the endpoint name, which doubles as the
 // sip_username the agent registered with.
+// Asterisk channel names are PJSIP/<endpoint>-<hex-id>, where the trailing
+// hex id is always separated by the LAST hyphen — matching up to the FIRST
+// hyphen instead would silently break attribution for any sip_username that
+// itself contains one (sip_username has no format constraint in the schema).
 function parseSipUsername(channelName) {
-    const match = /^PJSIP\/([^-]+)-/.exec(channelName || '');
+    const match = /^PJSIP\/(.+)-[0-9a-f]+$/.exec(channelName || '');
     return match ? match[1] : null;
 }
 
@@ -1035,6 +1059,27 @@ async function main() {
 
     client.on('error', err => console.error('❌ ARI client error:', err.message));
 
+    // Reconciled BEFORE client.start()/the poll intervals below register —
+    // otherwise a call could theoretically enter Stasis in the brief window
+    // while these sequential startup queries are still in flight, and
+    // getAvailableAgentsWithSip() could see an agent this restart hasn't
+    // reconciled back from stale on-call/ringing yet.
+    //
+    // This process owns zero in-memory state for anything that was already
+    // ivr_started/queued/ongoing before it started — a prior instance's
+    // crash or a routine deploy restart both orphan those rows the same
+    // way. Left alone they'd sit in call_logs looking "live" forever, since
+    // nothing would ever move them to a terminal status again.
+    const reconciled = await reconcileStaleCallsOnStartup();
+    if (reconciled > 0) console.log(`🧹 Reconciled ${reconciled} stale in-progress call(s) from before this restart`);
+
+    const staleAgentsReconciled = await reconcileStaleAgentsOnStartup();
+    if (staleAgentsReconciled > 0)
+        console.log(`🧹 Reconciled ${staleAgentsReconciled} agent(s) stuck on-call from before this restart`);
+
+    const ghostsReconciled = await reconcileGhostAgents();
+    if (ghostsReconciled.length > 0) console.log(`👻 Reconciled ${ghostsReconciled.length} ghost agent(s) back to offline on startup`);
+
     client.start(APP_NAME);
     setInterval(() => tryDequeueNext().catch(err => console.error('❌ Queue poll error:', err.message)), QUEUE_POLL_MS);
     setInterval(() => timeoutStaleQueueEntries().catch(err => console.error('❌ Queue timeout sweep error:', err.message)), QUEUE_POLL_MS);
@@ -1068,21 +1113,6 @@ async function main() {
                 .catch(err => console.error('❌ Ghost agent poll error:', err.message)),
         GHOST_AGENT_POLL_MS
     );
-
-    // This process owns zero in-memory state for anything that was already
-    // ivr_started/queued/ongoing before it started — a prior instance's
-    // crash or a routine deploy restart both orphan those rows the same
-    // way. Left alone they'd sit in call_logs looking "live" forever, since
-    // nothing would ever move them to a terminal status again.
-    const reconciled = await reconcileStaleCallsOnStartup();
-    if (reconciled > 0) console.log(`🧹 Reconciled ${reconciled} stale in-progress call(s) from before this restart`);
-
-    const staleAgentsReconciled = await reconcileStaleAgentsOnStartup();
-    if (staleAgentsReconciled > 0)
-        console.log(`🧹 Reconciled ${staleAgentsReconciled} agent(s) stuck on-call from before this restart`);
-
-    const ghostsReconciled = await reconcileGhostAgents();
-    if (ghostsReconciled.length > 0) console.log(`👻 Reconciled ${ghostsReconciled.length} ghost agent(s) back to offline on startup`);
 
     console.log(`✅ ARI app "${APP_NAME}" connected to ${ARI_URL} and listening`);
 }

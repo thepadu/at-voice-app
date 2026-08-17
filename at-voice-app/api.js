@@ -599,7 +599,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // extra endpoint work.
     app.post('/api/calls/active/add-party', requireAuth, async (req, res) => {
         const { destination } = req.body;
-        if (!destination || !destination.trim()) {
+        if (typeof destination !== 'string' || !destination.trim()) {
             return res.status(400).json({ error: 'Destination is required' });
         }
 
@@ -680,14 +680,14 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             // TURN relay for agents on networks where a direct/STUN-only ICE
             // path fails (symmetric NAT, restrictive mobile/corporate
             // firewalls) — without this the browser had no NAT-traversal
-            // fallback at all. Fallback values match what's actually
-            // provisioned on the VPS today; override via env vars once set
-            // on Render so this real (low-sensitivity — a TURN credential
-            // only allows relaying traffic, nothing account-level) secret
-            // isn't the one actually in use long-term.
+            // fallback at all. No hardcoded password fallback (unlike
+            // url/username, which aren't credentials) — this used to default
+            // to a real TURN password checked into source, silently
+            // resurfacing it forever if the env var was ever unset. That
+            // credential should be rotated on the TURN server itself.
             turnUrl: process.env.SOFTPHONE_TURN_URL || 'turn:64.227.160.38:3478',
             turnUsername: process.env.SOFTPHONE_TURN_USERNAME || 'chumzagent',
-            turnPassword: process.env.SOFTPHONE_TURN_PASSWORD || 'Ib5Ntu84xtEkJTZdmUX95oDbZcq1uYT5'
+            turnPassword: process.env.SOFTPHONE_TURN_PASSWORD
         });
     });
 
@@ -704,7 +704,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         // structural (comma separates conditions, parens group them) —
         // otherwise a search term containing them would corrupt the filter
         // string instead of just failing to match anything.
-        const q = (req.query.q || '').trim().replace(/[,()]/g, '');
+        const q = (typeof req.query.q === 'string' ? req.query.q : '').trim().replace(/[,()]/g, '');
 
         let query = supabase.from('agents').select('*', { count: 'exact' }).order('id', { ascending: true });
         // Matches name OR phone — searching against two columns needs an
@@ -849,7 +849,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     app.patch('/api/ivr-config', requireSupervisor, async (req, res) => {
         const { greeting, tts_voice, tts_speed_scale, rating_enabled } = req.body;
 
-        if (greeting !== undefined && !greeting.trim()) {
+        if (greeting !== undefined && (typeof greeting !== 'string' || !greeting.trim())) {
             return res.status(400).json({ error: 'Greeting cannot be empty' });
         }
         if (tts_voice !== undefined && !IVR_VOICES.includes(tts_voice)) {
@@ -1103,7 +1103,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     app.post('/api/ticket-tags', requireSupervisor, async (req, res) => {
         const { name } = req.body;
 
-        if (!name || !name.trim()) {
+        if (typeof name !== 'string' || !name.trim()) {
             return res.status(400).json({ error: 'Tag name is required' });
         }
 
@@ -1188,7 +1188,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Invalid condition' });
         }
 
-        if (!destination || !destination.trim()) {
+        if (typeof destination !== 'string' || !destination.trim()) {
             return res.status(400).json({ error: 'Destination is required' });
         }
 
@@ -1258,7 +1258,9 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         }
 
         if (after_hours_message !== undefined) {
-            if (!after_hours_message.trim()) return res.status(400).json({ error: 'After-hours message cannot be empty' });
+            if (typeof after_hours_message !== 'string' || !after_hours_message.trim()) {
+                return res.status(400).json({ error: 'After-hours message cannot be empty' });
+            }
             fieldUpdates.after_hours_message = after_hours_message;
         }
 

@@ -49,6 +49,20 @@ export default function TicketDrawer() {
     const [assignedAgentId, setAssignedAgentId] = useState<number | ''>('');
     const [notes, setNotes] = useState('');
 
+    // This drawer stays mounted (just hidden) between calls, so without this
+    // a draft left unsubmitted for one caller — notes, tag, assignee — would
+    // still be sitting in these fields the next time "Add Ticket" is opened
+    // for a completely different caller, ready to be submitted against the
+    // wrong call. Keyed on session_id specifically (not quickTicketOpen) so
+    // toggling the drawer closed and back open for the SAME ongoing call
+    // still preserves an in-progress draft.
+    useEffect(() => {
+        setTag('');
+        setPriority('Medium');
+        setAssignedAgentId('');
+        setNotes('');
+    }, [call?.session_id]);
+
     const create = useMutation({
         mutationFn: () =>
             apiFetch('/api/tickets', {

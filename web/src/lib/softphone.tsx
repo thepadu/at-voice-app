@@ -4,7 +4,7 @@ import type { Invitation, Session } from 'sip.js';
 import { apiFetch } from './api';
 import { useAuth } from './auth';
 import { useToast } from './toast';
-import { setCallInProgress } from './callState';
+import { isCallInProgress, setCallInProgress } from './callState';
 
 export type RegistrationState = 'unregistered' | 'registering' | 'registered' | 'failed';
 
@@ -285,6 +285,18 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                         }, delay);
                     },
                     onInvite: (invitation: Invitation) => {
+                        // The ARI-side queue shouldn't ring an agent who's
+                        // already busy, but unlike placeCall (which refuses
+                        // outright) nothing here guarded against it — a
+                        // status-sync race on the server would silently swap
+                        // the whole UI to a second incoming-call banner,
+                        // stranding the agent with no controls left for the
+                        // still-live first call. Declining immediately is a
+                        // much safer failure mode than that.
+                        if (isCallInProgress()) {
+                            invitation.reject().catch(() => {});
+                            return;
+                        }
                         const callerNumber = invitation.remoteIdentity.uri.user ?? 'Unknown';
                         setIncomingCall({ session: invitation, callerNumber });
                         wireSessionStateChange(invitation, callerNumber);

@@ -189,6 +189,11 @@ export default function CallScreen() {
     });
 
     function submitAddParty() {
+        // The button already disables on isPending, but Enter in the input
+        // field calls this directly with no such guard — without this,
+        // pressing Enter twice quickly fires two concurrent add-party
+        // requests for the same call.
+        if (addParty.isPending) return;
         const phone = formatPhone(addPartyInput);
         if (!isValidPhone(phone)) {
             showToast('Enter a valid Kenyan number', 'error');

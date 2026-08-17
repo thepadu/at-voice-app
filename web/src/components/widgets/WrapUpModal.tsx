@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import { useActiveCall } from '../../lib/activeCall';
@@ -11,6 +11,13 @@ export default function WrapUpModal() {
     const { justEnded, lastCall, dismissJustEnded } = useActiveCall();
     const [disposition, setDisposition] = useState('Resolved');
     const showToast = useToast();
+
+    // Same reasoning as TicketDrawer's reset — this modal stays mounted
+    // between calls, so a disposition picked (or left) for one call would
+    // otherwise still be selected by default for the next one.
+    useEffect(() => {
+        setDisposition('Resolved');
+    }, [lastCall?.session_id]);
 
     const finish = useMutation({
         mutationFn: () =>

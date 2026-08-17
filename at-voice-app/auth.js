@@ -48,7 +48,15 @@ module.exports = function (app, supabase) {
         .filter(key => !process.env[key]);
 
     if (missingEnvVars.length) {
+        // Fatal, not just logged: without these every login attempt dead-ends
+        // in a generic "Authentication failed" and every request looks like
+        // an expired session to requireAuth below — a silent full-app outage
+        // with only one easily-missed console line as a clue. Loud and
+        // immediate is far easier to diagnose than that, especially right
+        // after a deploy/migration where a missing env var is the most
+        // likely cause of anything going wrong at all.
         console.error(`❌ Google SSO is misconfigured — missing env var(s): ${missingEnvVars.join(', ')}`);
+        process.exit(1);
     }
 
     // Bootstraps the very first supervisor(s) — there's otherwise no way for
@@ -357,9 +365,9 @@ module.exports = function (app, supabase) {
     // Protects the JSON API (api.js) and the /export and /ticket routes —
     // API requests get a 401 JSON body instead of a redirect, since a
     // fetch() call has no browser chrome to redirect.
-    function requireAuth(req, res, next) {
+    async function requireAuth(req, res, next) {
         try {
-            const payload = jwt.verify(req.cookies.session, process.env.JWT_SECRET);
+            const payload = jwt.verify(req.cookies.session, process.env.JWT_SECRET, { algorithms: ['HS256'] });
             req.user = payload;
 
             // Sliding session: a genuinely active agent re-issues a fresh
@@ -368,7 +376,20 @@ module.exports = function (app, supabase) {
             // touched for a full day does. `iat` is in seconds, everything
             // else here is milliseconds.
             if (Date.now() - payload.iat * 1000 > SESSION_REFRESH_AFTER_MS) {
-                issueSession(res, { email: payload.email, name: payload.name, role: payload.role, agentId: payload.agentId });
+                // Re-checked against the roster on every refresh, not just
+                // copied from the old payload — otherwise a supervisor
+                // demoted via the roster UI would keep re-authorizing as
+                // supervisor for up to another 24h of activity, since
+                // nothing else ever re-reads their role after login.
+                const { data: agent } = await supabase
+                    .from('agents')
+                    .select('id, role')
+                    .ilike('email', payload.email)
+                    .maybeSingle();
+                const role = agent?.role === 'supervisor' ? 'supervisor' : 'agent';
+                const agentId = agent?.id ?? null;
+                issueSession(res, { email: payload.email, name: payload.name, role, agentId });
+                req.user = { ...payload, role, agentId };
             }
 
             next();
