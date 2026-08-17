@@ -44,6 +44,11 @@ const APP_NAME = process.env.ARI_APP_NAME || 'chumz-ivr';
 const MENU_TIMEOUT_MS = 15000;
 const RATING_TIMEOUT_MS = 8000;
 const QUEUE_POLL_MS = 3000;
+// dequeueNext alone has no notion of "give up" — it just retries every tick
+// forever if agents keep being unavailable or keep not answering. Without
+// this ceiling, a customer can sit on hold indefinitely with no code path
+// that ever ends the call for them.
+const MAX_QUEUE_WAIT_MS = 5 * 60 * 1000;
 const ADD_PARTY_POLL_MS = 3000;
 const GHOST_AGENT_POLL_MS = 30000;
 // A single ghost reconciliation is a normal, expected event (a tab closed
@@ -281,6 +286,10 @@ async function tryDequeueNext() {
 async function dequeueNext() {
     const agents = await getAvailableAgentsWithSip();
     if (agents.length === 0) return;
+    // getAvailableAgentsWithSip is a real network round trip — the sole
+    // waiting customer can hang up (and get spliced out by the global
+    // StasisEnd handler) while it's in flight, leaving nothing left to shift.
+    if (waitingQueue.length === 0) return;
 
     const waiting = waitingQueue.shift();
     console.log(`📲 Ringing ${agents.length} available agent(s) for ${waiting.sessionId}`);
@@ -317,7 +326,8 @@ async function dequeueNext() {
                 channel: waiting.channel,
                 sessionId: waiting.sessionId,
                 agentId: agent.id,
-                bridge: waiting.bridge
+                bridge: waiting.bridge,
+                joinedAt: waiting.joinedAt
             });
             try {
                 const agentChannel = await client.channels.originate({
@@ -345,6 +355,47 @@ async function dequeueNext() {
         ringGroupBySessionId.delete(waiting.sessionId);
         waitingQueue.unshift(waiting); // nobody could actually be reached — retry next tick
     }
+}
+
+// Ends the call for anyone who's been waiting past MAX_QUEUE_WAIT_MS —
+// dequeueNext has no notion of giving up on its own, so without this a
+// customer can sit on hold forever if agents keep being unavailable or keep
+// not answering. Uses the same "no agents online" forwarding config as the
+// IVR-entry check, since a queue timeout is the same situation (nobody's
+// realistically going to answer) just discovered later.
+async function timeoutStaleQueueEntries() {
+    const cutoff = Date.now() - MAX_QUEUE_WAIT_MS;
+    const stale = waitingQueue.filter(w => w.joinedAt <= cutoff);
+    if (stale.length === 0) return;
+
+    for (const entry of stale) {
+        const idx = waitingQueue.indexOf(entry);
+        if (idx !== -1) waitingQueue.splice(idx, 1);
+        await giveUpOnQueuedCustomer(entry).catch(err =>
+            console.error(`❌ Failed to time out queued call ${entry.sessionId}:`, err.message)
+        );
+    }
+}
+
+async function giveUpOnQueuedCustomer({ channel, sessionId, bridge }) {
+    const { ttsVoice, ttsSpeedScale } = await getIvrConfig();
+    const voiceOpts = { voiceKey: ttsVoice, speedScale: ttsSpeedScale };
+
+    await (bridge || holdingBridge).removeChannel({ channel: channel.id }).catch(() => {});
+
+    const destination = await getNoAgentsForwardingDestination();
+    if (destination) {
+        console.log(`⌛↪️  ${sessionId}: queue wait exceeded ${MAX_QUEUE_WAIT_MS / 1000}s, forwarding to ${destination}`);
+        await upsertCallLog({ session_id: sessionId, status: 'forwarded' });
+        await channel.setChannelVar({ variable: 'FORWARD_DEST', value: destination }).catch(() => {});
+        await channel.continueInDialplan({ context: 'forward-external', extension: 's', priority: 1 }).catch(() => {});
+        return;
+    }
+
+    console.log(`⌛ ${sessionId}: queue wait exceeded ${MAX_QUEUE_WAIT_MS / 1000}s, no forwarding configured — apologizing and hanging up`);
+    await playText(channel, "We're sorry, all our agents are still busy right now. Please try again shortly.", voiceOpts).catch(() => {});
+    await upsertCallLog({ session_id: sessionId, status: 'failed' });
+    await channel.hangup().catch(() => {});
 }
 
 // Hangs up every ringing leg except the winner and reverts their agent
@@ -409,7 +460,21 @@ async function bridgeAgentLeg(agentChannel, agentId, customerSessionId) {
         await agentChannel.hangup().catch(() => {});
         await setAgentStatus(agentId, 'available');
         if (!customerHungUpEarly) {
-            waitingQueue.unshift({ channel: customerChannel, sessionId: customerSessionId, joinedAt: Date.now() });
+            // Preserve the customer's original bridge and joinedAt (from
+            // `pending`, captured back in enterQueue) rather than fabricating
+            // fresh ones — a new joinedAt here would reset their wait-time
+            // clock on every non-answer, letting the MAX_QUEUE_WAIT_MS
+            // timeout below be dodged indefinitely by repeated retries, and
+            // a missing bridge here silently falls back to the module-level
+            // holdingBridge, which can be a different bridge if it was ever
+            // recreated in between (see enterQueue's comment on why bridge
+            // is captured per-customer instead of re-read).
+            waitingQueue.unshift({
+                channel: customerChannel,
+                sessionId: customerSessionId,
+                joinedAt: pending.joinedAt,
+                bridge: customerHoldingBridge
+            });
         }
         return;
     }
@@ -936,16 +1001,23 @@ async function main() {
     });
 
     client.on('StasisEnd', async (event, channel) => {
-        // Drop from the waiting queue if they hang up before any agent's
-        // phone/browser started ringing.
-        const idx = waitingQueue.findIndex(w => w.channel.id === channel.id);
-        if (idx !== -1) waitingQueue.splice(idx, 1);
+        try {
+            // Drop from the waiting queue if they hang up before any agent's
+            // phone/browser started ringing.
+            const idx = waitingQueue.findIndex(w => w.channel.id === channel.id);
+            if (idx !== -1) waitingQueue.splice(idx, 1);
 
-        // Customer sessionId === their own channel id — if they hang up
-        // while a ring group is still out for them, nothing else would ever
-        // stop those other agents' phones/browsers from ringing.
-        if (ringGroupBySessionId.has(channel.id)) {
-            await stopSiblingRings(channel.id, null);
+            // Customer sessionId === their own channel id — if they hang up
+            // while a ring group is still out for them, nothing else would ever
+            // stop those other agents' phones/browsers from ringing.
+            if (ringGroupBySessionId.has(channel.id)) {
+                await stopSiblingRings(channel.id, null);
+            }
+        } catch (err) {
+            // Whatever went wrong above must not stop the call from being
+            // marked missed below — that's the one write that keeps a row
+            // from being stuck showing "waiting" in the dashboard forever.
+            console.error(`❌ StasisEnd cleanup error for ${channel.id}:`, err.message);
         }
 
         // Catch-all for "nobody ever picked this up": a call that leaves
@@ -956,13 +1028,16 @@ async function main() {
         // (agent legs, outbound legs, bridged/forwarded/after-hours calls
         // all have already moved past these statuses, so this is a no-op
         // for them).
-        await markMissedIfAbandoned(channel.id);
+        await markMissedIfAbandoned(channel.id).catch(err =>
+            console.error(`❌ Failed to mark ${channel.id} as missed:`, err.message)
+        );
     });
 
     client.on('error', err => console.error('❌ ARI client error:', err.message));
 
     client.start(APP_NAME);
     setInterval(() => tryDequeueNext().catch(err => console.error('❌ Queue poll error:', err.message)), QUEUE_POLL_MS);
+    setInterval(() => timeoutStaleQueueEntries().catch(err => console.error('❌ Queue timeout sweep error:', err.message)), QUEUE_POLL_MS);
     setInterval(() => tryAddPartyPoll().catch(err => console.error('❌ Add-party poll error:', err.message)), ADD_PARTY_POLL_MS);
 
     // "Ghost agents" — status says available/ringing but the browser
