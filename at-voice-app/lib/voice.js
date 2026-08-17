@@ -2,12 +2,21 @@
 // the outbound call that brings a non-SIP-provisioned agent onto standby.
 const AfricasTalking = require('africastalking');
 
-const africastalking = AfricasTalking({
-    apiKey: process.env.AT_API_KEY,
-    username: process.env.AT_USERNAME
-});
+// Built lazily (not at require-time) because the AfricasTalking() constructor
+// throws synchronously if apiKey/username are blank — doing that at module
+// load would crash the entire server on startup over a feature only
+// non-SIP-provisioned agents use, rather than failing just that one call.
+let voice = null;
+function getVoice() {
+    if (!voice) {
+        voice = AfricasTalking({
+            apiKey: process.env.AT_API_KEY,
+            username: process.env.AT_USERNAME
+        }).VOICE;
+    }
+    return voice;
+}
 
-const voice = africastalking.VOICE;
 const AT_NUMBER = process.env.AT_VOICE_NUMBER;
 
 // Africa's Talking's voice.call() has no per-call callback-URL override —
@@ -27,7 +36,7 @@ async function placeCall(phoneE164, clientRequestId) {
     const payload = { callFrom: AT_NUMBER, callTo: [phoneE164] };
     if (clientRequestId) payload.clientRequestId = clientRequestId;
 
-    return voice.call(payload);
+    return getVoice().call(payload);
 }
 
 module.exports = { placeCall };
