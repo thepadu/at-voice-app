@@ -16,7 +16,7 @@ module.exports = function (app, supabase) {
     const client = new OAuth2Client(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_CALLBACK_URL
+        process.env.GOOGLE_CALLBACK_URL?.trim()
     );
 
     // Shared by the initial login and every sliding-session refresh in
