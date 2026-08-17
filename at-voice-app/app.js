@@ -54,9 +54,15 @@ const BASE_URL = 'https://at-voice-app.onrender.com';
 // Routes
 apiRoutes(app, supabase, requireAuth, requireSupervisor);
 
-// Health
-app.get('/', (req, res) => {
+// Health check for DO App Platform's readiness/liveness probes — kept
+// separate from '/' so visitors hitting the bare domain land in the
+// actual dashboard instead of a bare status string.
+app.get('/healthz', (req, res) => {
     res.send('✅ Chumz IVR running');
+});
+
+app.get('/', (req, res) => {
+    res.redirect('/app');
 });
 
 // Old server-rendered dashboard is gone — send bookmarks to the React app.
