@@ -67,7 +67,15 @@ module.exports = function (app, supabase) {
         .map(e => e.trim().toLowerCase())
         .filter(Boolean);
 
+    const LOGIN_ERROR_MESSAGES = {
+        access_denied: 'Sign-in was cancelled. Click below to try again.',
+        session_expired: 'That login attempt timed out or couldn’t be verified — please try again.',
+        email_unverified: 'That Google account’s email isn’t verified. Please use a verified account.',
+        auth_failed: 'Something went wrong signing you in. Please try again.'
+    };
+
     app.get('/login', (req, res) => {
+        const errorMessage = LOGIN_ERROR_MESSAGES[req.query.error];
         res.send(`
         <html>
         <head>
@@ -181,6 +189,16 @@ module.exports = function (app, supabase) {
                     font-size: 14px;
                     margin: 0 0 28px;
                 }
+                .form-error {
+                    background: #fef2f2;
+                    color: #b91c1c;
+                    border: 1px solid #fecaca;
+                    border-radius: 8px;
+                    padding: 10px 14px;
+                    font-size: 13px;
+                    margin: 0 0 20px;
+                    text-align: left;
+                }
                 .form-note {
                     color: #94a3b8;
                     font-size: 12px;
@@ -231,6 +249,7 @@ module.exports = function (app, supabase) {
                     <div class="form-card">
                         <div class="form-title">Welcome back</div>
                         <p class="form-sub">Sign in with your Google account to start your shift.</p>
+                        ${errorMessage ? `<div class="form-error">${errorMessage}</div>` : ''}
                         <a href="/auth/google" class="btn">
                             <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/><path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.11-7.45 2.11-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.69 28.19A13.9 13.9 0 0 1 10.94 24c0-1.45.25-2.86.7-4.19v-5.7H4.34A22.9 22.9 0 0 0 2 24c0 3.72.89 7.23 2.34 10.19l7.35-5.7z"/><path fill="#EA4335" d="M24 10.75c3.23 0 6.14 1.11 8.42 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 13.81l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/></svg>
                             Sign in with Google
@@ -278,7 +297,16 @@ module.exports = function (app, supabase) {
         res.clearCookie('oauth_state');
 
         if (!req.query.state || !expectedState || req.query.state !== expectedState) {
-            return res.status(403).send('This login attempt could not be verified — please try signing in again.');
+            return res.redirect('/login?error=session_expired');
+        }
+
+        // Google redirects back with `error` (not `code`) instead of failing
+        // silently when the user cancels/denies on its own consent screen —
+        // previously unhandled here, so this fell through to client.getToken
+        // with an undefined code, throwing into the generic catch below and
+        // showing a bare "Authentication failed" page with no way back.
+        if (req.query.error) {
+            return res.redirect('/login?error=access_denied');
         }
 
         try {
@@ -291,7 +319,7 @@ module.exports = function (app, supabase) {
             const payload = ticket.getPayload();
 
             if (!payload.email_verified) {
-                return res.status(403).send('Your Google account email is not verified');
+                return res.redirect('/login?error=email_unverified');
             }
 
             // Lowercased once, used everywhere below — agents.email has a
@@ -353,7 +381,7 @@ module.exports = function (app, supabase) {
             res.redirect('/app');
         } catch (error) {
             console.error('❌ Google auth failed:', error.message);
-            res.status(401).send('Authentication failed');
+            res.redirect('/login?error=auth_failed');
         }
     });
 
