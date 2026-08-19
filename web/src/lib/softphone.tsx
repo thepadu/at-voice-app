@@ -181,9 +181,20 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 // credentials provisioned yet — anything else (401, 500,
                 // network failure) is a real problem worth seeing rather
                 // than silently leaving registrationState stuck at
-                // 'unregistered' with no clue why.
+                // 'unregistered' with no clue why. Either way this retries
+                // with the same backoff as a dropped transport below, rather
+                // than leaving the agent stuck on 'failed' until they
+                // happen to switch tabs (which is the only other thing that
+                // currently forces a retry) or refresh the page — a
+                // supervisor provisioning credentials for a brand-new agent
+                // takes effect automatically without either of those.
                 console.error('[softphone] failed to fetch SIP credentials:', err);
                 setRegistrationState('failed');
+                const delay = reconnectDelayMsRef.current;
+                reconnectDelayMsRef.current = Math.min(reconnectDelayMsRef.current * 2, 30000);
+                reconnectTimer = setTimeout(() => {
+                    if (!cancelled) setReconnectNonce(n => n + 1);
+                }, delay);
                 return;
             }
             if (cancelled) return;
