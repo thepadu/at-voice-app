@@ -85,21 +85,47 @@ app.get('/dashboard', (req, res) => {
 });
 
 
-// 🔹 VOICE — Africa's Talking's account-wide Voice callback URL. Confirmed
-// live (2026-08-19) that this is NOT dead despite real call handling being
-// entirely the SIP trunk's job now: AT fires this same URL for any call
-// that presents an AT-owned caller ID at all — including every outbound
-// call placed through the self-hosted Asterisk SIP trunk — and requires a
-// *valid* XML response or it aborts the call outright. Tried removing this
-// route entirely first; that made AT's own webhook get a 404 instead of an
-// answer, which killed the call exactly as dead as the old <Hangup/>
-// fallback did (both visible in AT's own dashboard as a 0-duration
-// "Aborted" session with a 480 on the SIP side seconds after ringing
-// started). There is nothing left for this to actually control — the SIP
-// trunk already fully owns the call — so unconditionally acknowledging is
-// correct, not a placeholder for logic still to come.
+// XML-escape before embedding request-derived values into a voice
+// response — cheap defensive habit even though these are just digits/+
+// from an AT-signed webhook, not free-text user input.
+function escapeXml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
+// 🔹 VOICE — Africa's Talking's account-wide Voice callback URL. The
+// "at-trunk" PJSIP endpoint (ari-app) is registered with AT as a *SIP
+// phone*, not a true SIP trunk — its Voice callback URL on AT's side is a
+// plain https:// URL, not their `trunk:<ip>` callback format reserved for
+// real trunk numbers. Per AT's own SIP-phone docs, confirmed live
+// (2026-08-19): every outbound call placed through it fires this webhook
+// with callSessionState "Answered", and AT will NOT actually connect the
+// call — 480 on the SIP side within seconds, regardless of what our
+// Asterisk dialplan is doing — unless this responds with a <Dial> action
+// authorizing it. An empty <Response/>, a <Hangup/>, and a 404 (all tried,
+// all confirmed live via AT's own dashboard as a 0-duration "Aborted"
+// session) fail identically; only <Dial> actually completes the call.
+// Real inbound calls are unaffected — ari-app's own logs show those
+// bridging normally end to end — this is specific to agent-initiated
+// outbound dialing.
 app.post('/voice', verifyAtWebhookSecret, (req, res) => {
     res.set('Content-Type', 'application/xml');
+
+    if (req.body.direction === 'Outbound' && req.body.callSessionState === 'Answered') {
+        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
+            '<Response>' +
+                `<Dial phoneNumbers="${escapeXml(req.body.callerNumber)}" callerId="${escapeXml(req.body.destinationNumber)}"/>` +
+            '</Response>');
+    }
+
+    // A session-end notification (or anything else unrecognized) has
+    // nothing to act on — AT's own dashboard flags a Hangup sent in reply
+    // to a Completed notification as an invalid action, since the call is
+    // already over by the time it arrives.
     res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 });
 
