@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
 import { useModalA11y } from '../lib/useModalA11y';
+import { formatPhone, isValidPhone } from '../lib/phoneFormat';
 import { Users } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 import StatusDropdown from '../components/StatusDropdown';
@@ -61,10 +62,16 @@ export default function Agents() {
     }
 
     const saveAgent = useMutation({
-        mutationFn: () =>
-            editingId
-                ? apiFetch(`/api/agents/${editingId}`, { method: 'PATCH', body: JSON.stringify(form) })
-                : apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(form) }),
+        // The backend requires strict E.164 (+254712345678) — same
+        // normalization the dialer already applies, so a supervisor can type
+        // a number the way everyone actually types it (0712345678) instead
+        // of hitting a server-side validation error for not typing "+254".
+        mutationFn: () => {
+            const body = { ...form, phone: `+${formatPhone(form.phone)}` };
+            return editingId
+                ? apiFetch(`/api/agents/${editingId}`, { method: 'PATCH', body: JSON.stringify(body) })
+                : apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(body) });
+        },
         onSuccess: () => {
             showToast(editingId ? 'Agent updated' : 'Agent added');
             setFormOpen(false);
@@ -72,6 +79,15 @@ export default function Agents() {
         },
         onError: (err: unknown) => setFormError(err instanceof Error ? err.message : 'Something went wrong')
     });
+
+    function submitAgent() {
+        if (!isValidPhone(formatPhone(form.phone))) {
+            setFormError('Enter a valid Kenyan number (e.g. 0712345678 or +254712345678)');
+            return;
+        }
+        setFormError('');
+        saveAgent.mutate();
+    }
 
     const toggleStatus = useMutation({
         mutationFn: ({ id, status }: { id: number; status: Agent['status'] }) =>
@@ -184,8 +200,8 @@ export default function Agents() {
                             <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
                         </label>
                         <label>
-                            Phone (+254...)
-                            <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+254712345678" />
+                            Phone
+                            <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="0712345678" />
                         </label>
                         <label>
                             Email (optional — links their Google login)
@@ -203,7 +219,7 @@ export default function Agents() {
 
                         <div className="modal-actions">
                             <button className="btn btn-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
-                            <button className="btn btn-primary" onClick={() => saveAgent.mutate()} disabled={saveAgent.isPending}>
+                            <button className="btn btn-primary" onClick={submitAgent} disabled={saveAgent.isPending}>
                                 Save
                             </button>
                         </div>
