@@ -601,7 +601,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
                 return;
             }
             const target = UserAgent.makeURI(`sip:${destinationE164}@${domainRef.current}`);
-            if (!target) return;
+            if (!target) {
+                // Every other failure path here shows a toast — this one
+                // returned bare, so a malformed destination made the dialer
+                // silently do nothing: no error, no call, no clue why. The
+                // caller (FloatingDialer) treats a non-throwing placeCall()
+                // as success and closes the popover as if the call went out.
+                console.error('[softphone] UserAgent.makeURI returned null for', destinationE164, domainRef.current);
+                showToast('Could not place call — invalid number', 'error');
+                return;
+            }
 
             const inviter = new Inviter(userAgent, target);
             setOutgoingCall({ session: inviter, remoteNumber: destinationE164 });
