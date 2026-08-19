@@ -36,8 +36,6 @@ This describes the system as it exists today, not a history of how it got here. 
 │  Express (DigitalOcean App Platform): app.js                │
 │    ├── api.js      JSON API for the React dashboard         │
 │    ├── auth.js     Google SSO + role/agentId resolution     │
-│    ├── lib/voice.js  Africa's Talking calling helper         │
-│    │                 (legacy agent-standby fallback only)    │
 │    └── /web/dist   React SPA, served as static files at /app │
 └──────────────────────────────────────────────────────────────┘
           ▲
@@ -49,7 +47,7 @@ This describes the system as it exists today, not a history of how it got here. 
 
 Two separate Node processes, two separate hosts:
 - **`ari-app/`** runs on the same Ubuntu 24.04 VPS as Asterisk itself (`sip.chumz.online`), started via systemd (`chumz-ari-app.service`, `Restart=always`). This is where all real-time call control lives — it talks to Asterisk over ARI (a WebSocket for events, REST for commands), and to Supabase for everything the dashboard needs to see.
-- **`at-voice-app/`** (Express) runs on DigitalOcean App Platform, at `calls.chumz.online` (migrated from Render). It serves the React dashboard, the JSON API the dashboard calls, Google OAuth, and a small legacy fallback (see "Legacy Africa's Talking fallback" below). It does **not** handle any live call audio or signaling — that's entirely the ARI app's job.
+- **`at-voice-app/`** (Express) runs on DigitalOcean App Platform, at `calls.chumz.online` (migrated from Render). It serves the React dashboard, the JSON API the dashboard calls, and Google OAuth. It does **not** handle any live call audio or signaling — that's entirely the ARI app's job.
 
 Both processes talk to the **same Supabase project** with the `service_role` key (bypasses RLS at the Postgres role level — RLS policy content is a non-issue for either process).
 
@@ -63,14 +61,14 @@ Google OAuth (`auth.js`), open to **any** Google account — no domain or email 
 
 - Session: a JWT in an `httpOnly`, `secure`, `sameSite: 'lax'` cookie, valid **7 days**, containing `{ email, name, role, agentId }` — `email` is lowercased and `agentId` resolved from `agents` once, at login. There is no server-side session revocation: demoting/removing an agent doesn't invalidate an already-issued token, it just expires naturally within 7 days.
 - Every self-service endpoint (`/api/agents/me/*`) matches by the JWT's `agentId` when present, falling back to a case-insensitive email match only for sessions issued before this existed. Matching by raw email used to be case-sensitive against a case-sensitive unique column — a real mismatch (e.g. an email typed with different casing during manual provisioning) silently created a brand-new duplicate agent row instead of erroring, which is exactly the kind of bug `agentId`-based lookups sidestep.
-- `requireAuth`: valid session required. Left open (no auth) for the routes Africa's Talking's servers call directly with no cookie to send: `/voice`, `/agent-standby`, `/agent-standby-input`, `/events`.
+- `requireAuth`: valid session required. Left open (no auth) for `/events`, the one route Africa's Talking's servers call directly with no cookie to send.
 - `requireSupervisor`: `requireAuth` plus `role === 'supervisor'`. Gates the full agent roster, IVR/forwarding/business-hours configuration, and the Analytics page — reads included, not just writes. `/api/agents/stats` and `/api/agents/me/*` are intentionally *not* supervisor-gated (every agent needs their own numbers and presence control).
 
 ## Data model
 
-- **`call_logs`**: one row per call, keyed by `session_id` (the originating Asterisk channel ID for calls handled by `ari-app`, or Africa's Talking's session id for the legacy fallback path). `status`: `ivr_started`, `input_received`, `queued`, `ongoing`, `completed`, `failed` (abandoned before an agent answered), `forwarded` (routed elsewhere because nobody was online), `after_hours`, `dialing` (outbound, ringing the destination). `direction`: `Inbound` / `Outbound`. `agent_number` is the bridged agent's phone number (matched against `agents.phone`, not `agents.id`, for historical reasons).
+- **`call_logs`**: one row per call, keyed by `session_id` (the originating Asterisk channel ID). `status`: `ivr_started`, `input_received`, `queued`, `ongoing`, `completed`, `failed` (abandoned before an agent answered), `forwarded` (routed elsewhere because nobody was online), `after_hours`, `dialing` (outbound, ringing the destination). `direction`: `Inbound` / `Outbound`. `agent_number` is the bridged agent's phone number (matched against `agents.phone`, not `agents.id`, for historical reasons).
 - **`agents`**: `id, name, phone, email, status ('available' | 'on_call' | 'ringing' | 'break' | 'offline'), role ('agent' | 'supervisor'), last_seen_at`. `last_seen_at` is a browser-softphone heartbeat timestamp (see "Presence integrity" below) — `status` alone was never trustworthy enough to route calls on.
-- **`agent_sip_credentials`**: `agent_id, sip_username, sip_password` — links an agent to a PJSIP/WebRTC endpoint provisioned on the Asterisk box. An agent with a row here is on the real softphone; one without falls back to the legacy phone-standby flow.
+- **`agent_sip_credentials`**: `agent_id, sip_username, sip_password` — links an agent to a PJSIP/WebRTC endpoint provisioned on the Asterisk box. An agent with no row here has no way to take calls today (see "Removed: legacy Africa's Talking fallback" below) — going "available" is rejected until a supervisor provisions one.
 - **`ivr_options`** / **`ivr_config`**: menu digits and the greeting line, supervisor-editable, read live by `ari-app` on every call (not cached beyond a call's own lifetime).
 - **`business_hours`**: singleton row (`enabled, open_time, close_time, active_days, after_hours_message`). Checked by `ari-app` before running the IVR menu — outside these hours, the caller hears the message instead and the call is logged `after_hours`.
 - **`tickets`** / **`ticket_tags`**: the Tags & Tickets page. `call_logs.ticket_status` (an older, simpler enum) still exists in the schema but nothing writes to it anymore.
@@ -97,15 +95,17 @@ Google OAuth (`auth.js`), open to **any** Google account — no domain or email 
 
 ### Presence integrity ("ghost agents")
 
-`agents.status` alone is never trusted blindly. The browser softphone sends a heartbeat (`PATCH /api/agents/me/heartbeat`) every ~20s while genuinely registered, stamping `last_seen_at`. The ARI app periodically (every 30s, plus once on startup) flips any agent claiming `available`/`ringing` with a stale (>90s) or missing heartbeat back to `offline` — catches a dead tab, a lost connection, or a row seeded/provisioned as `available` that nobody ever actually logged into. Scoped to agents with SIP credentials only; the legacy phone-standby flow doesn't run a heartbeat and doesn't need one.
+`agents.status` alone is never trusted blindly. The browser softphone sends a heartbeat (`PATCH /api/agents/me/heartbeat`) every ~20s while genuinely registered, stamping `last_seen_at`. The ARI app periodically (every 30s, plus once on startup) flips any agent claiming `available`/`ringing` with a stale (>90s) or missing heartbeat back to `offline` — catches a dead tab, a lost connection, or a row seeded/provisioned as `available` that nobody ever actually logged into. Scoped to agents with SIP credentials — an agent without any can't go `available` at all (see below), so there's nothing for this to police for them.
 
 Separately, on every startup the ARI app reconciles any `call_logs` row still sitting in a non-terminal status back to `failed` — its in-memory queue/ring-group state always starts empty after a restart, so anything still "in progress" from a previous process instance is orphaned by definition.
 
-### Legacy Africa's Talking fallback (currently a dead end)
+### Removed: legacy Africa's Talking fallback (2026-08-19)
 
-An agent with **no** row in `agent_sip_credentials` falls back, when going "available," to `api.js`'s `setAgentStatus` placing a real, billed phone call via `lib/voice.js`. When answered, Africa's Talking calls back into `/voice` (tagged `clientRequestId: agent-standby:{id}`), which redirects into `/agent-standby` → a `GetDigits` loop that, on a keypress, tries to `<Dequeue>` a caller from an Africa's Talking-side hold queue.
+`app.js` used to fall back, for an agent with no `agent_sip_credentials` row going "available," to placing a real billed phone call via `lib/voice.js` and a `/voice` → `/agent-standby` → `/agent-standby-input` `<GetDigits>`/`<Dequeue>` loop. It was already a confirmed dead end before removal — the Africa's Talking hold queue it dequeued from was only ever populated by the long-removed `/handle-input` route, so an agent in that loop always just heard "No calls waiting."
 
-**This currently cannot work**: that queue is only ever populated by an `<Enqueue>` in the old `/handle-input` route, which was removed once real inbound calls stopped arriving via Africa's Talking's webhooks at all (see "Inbound" above — they go straight into Asterisk via the SIP trunk now). An agent without a softphone who goes "available" today will place a real call to their own phone and sit in a loop that always says "No calls waiting." Kept in place rather than deleted because removing it outright means deciding what should happen instead — a product decision, not a cleanup one.
+It was also actively **causing** the outbound-call bug fixed the same day (see below) — worth noting since the two are easy to conflate: that bug was Africa's Talking's account-wide Voice URL (still `/voice` at the time) firing for *any* call presenting the AT-owned outbound caller ID, including real SIP-trunk calls having nothing to do with this fallback, and `/voice`'s catch-all `<Hangup/>` killing them. Removing the fallback removed `/voice`, `/agent-standby`, `/agent-standby-input`, and `lib/voice.js` entirely; `setAgentStatus` (`api.js`) now just rejects "available" with an error for an agent with no SIP credentials, telling them to ask a supervisor to provision one.
+
+`/events` remains — it's Africa's Talking's separate account-wide call-events callback, not tied to the Voice fallback — but whether it still receives any real traffic now that calls route through the SIP trunk is unverified; treat its writes to `call_logs` with the same caution as before.
 
 ## Frontend (`/web`)
 
@@ -137,13 +137,12 @@ Vite + React + TypeScript + React Router + TanStack Query. ESLint + Prettier + V
 - **`holdingBridge` singleton has a narrow race window** during creation/recovery — accepted, not yet fixed.
 - **`busy`/`always` forwarding conditions** are saved but not applied to live routing — only `no_answer` is wired.
 - **No server-side session revocation** — a removed/demoted agent's existing JWT stays valid until it naturally expires (up to 7 days).
-- **Legacy AT phone-standby fallback is a dead end in practice** — see "Legacy Africa's Talking fallback" above.
 - **Single-vCPU VPS**: Piper TTS synthesis fully serializes under concurrent load — mitigated by content-hash caching (a prompt is normally only synthesized once, ever) and an in-flight-promise lock preventing two concurrent requests for the same uncached text from racing.
 
 ## What's deliberately not built
 
 1. Real-time push (see Known limitations).
 2. Live routing for `busy`/`always` forwarding conditions.
-3. A real fallback for agents without a softphone — the existing one doesn't work; nothing has replaced it yet.
+3. A fallback for agents without a softphone — the old, non-working one was removed 2026-08-19; nothing has replaced it, so such an agent simply can't go "available" today.
 4. Server-side session revocation.
 5. Multi-country support — one Africa's Talking account covers every market they operate in, but there's no `country` column or per-country IVR/routing resolution yet.

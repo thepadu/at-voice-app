@@ -1,6 +1,5 @@
 const { isValidE164, normalizePhone } = require('./lib/phone');
 const { invalidateAgentCache } = require('./lib/agentCache');
-const { placeCall } = require('./lib/voice');
 
 // Must match ari-app/supabase.js's GHOST_AGENT_STALE_MS — this is only used
 // to keep the topbar's "N agents live" count from overcounting a dead tab
@@ -78,17 +77,14 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         return result;
     }
 
-    // Going "available" means different things depending on how this agent
-    // actually takes calls:
-    //  - Agents with a real WebRTC softphone (a row in agent_sip_credentials,
-    //    provisioned on the self-hosted Asterisk box) just need the DB flag
-    //    flipped — the ARI app rings their *browser* directly the moment it
-    //    sees status='available', so placing a real phone call here would be
-    //    actively wrong (a stray billed call unrelated to the softphone).
-    //  - Agents never migrated to a softphone fall back to the original
-    //    behavior: a real outbound call that brings them onto the old
-    //    phone-standby hold-queue loop (see app.js's /agent-standby), so
-    //    nothing already depending on that path breaks.
+    // Going "available" just flips the DB flag — the ARI app rings this
+    // agent's *browser* directly the moment it sees status='available'. An
+    // agent with no row in agent_sip_credentials has no browser softphone to
+    // ring at all, so there's nothing useful "available" can mean for them
+    // yet (the old fallback here — a real, billed phone call into a
+    // phone-standby hold-queue loop — was removed 2026-08-19: the queue it
+    // dequeued from had nothing feeding it since real inbound calls moved to
+    // the SIP trunk, so it always just told the agent "No calls waiting").
     async function setAgentStatus(agent, status) {
         if (status !== 'available') {
             return updateAgentStatus(agent.id, { status });
@@ -100,21 +96,11 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             .eq('agent_id', agent.id)
             .maybeSingle();
 
-        if (sipCreds) {
-            return updateAgentStatus(agent.id, { status: 'available' });
+        if (!sipCreds) {
+            throw new Error('No softphone set up for your account yet — ask a supervisor to provision one before going available');
         }
 
-        await supabase.from('agents').update({ status: 'ringing' }).eq('id', agent.id);
-
-        try {
-            await placeCall(agent.phone, `agent-standby:${agent.id}`);
-        } catch (error) {
-            console.error(`❌ Failed to call agent ${agent.id} for standby:`, error.message);
-            await supabase.from('agents').update({ status: 'offline' }).eq('id', agent.id);
-            throw new Error('Could not reach that number — check it and try again');
-        }
-
-        return supabase.from('agents').select().eq('id', agent.id).single();
+        return updateAgentStatus(agent.id, { status: 'available' });
     }
 
     app.get('/api/me', requireAuth, (req, res) => {

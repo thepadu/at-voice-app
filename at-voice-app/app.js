@@ -47,24 +47,12 @@ const supabase = createClient(
 
 const { requireAuth, requireSupervisor } = authRoutes(app, supabase);
 
-const STANDBY_TIMEOUT = 30;
-const QUEUE_NAME = 'support-queue';
-// Stale across the Render->DO migration once already (this hardcoded value
-// used to be the old onrender.com URL) — an env var this time so the next
-// domain change doesn't silently break the non-SIP agent standby loop again.
-const BASE_URL = process.env.BASE_URL || 'https://calls.chumz.online';
-
-// None of /voice, /agent-standby, /agent-standby-input, /events run through
-// requireAuth — they're Africa's Talking's own webhook callbacks, which
-// can't carry an agent's session cookie. Without any check at all, though,
-// they're wide open: /agent-standby-input's agentId is a small guessable
-// integer, and hitting it directly flips that agent to on_call and marks
-// the oldest genuinely-waiting customer's call_logs row 'ongoing' — making
-// them silently vanish from the Live Queue dashboard while still actually
-// waiting. Opt-in (not enforced until the env var is set) because these
-// URLs are registered as static callback URLs in Africa's Talking's own
-// dashboard — turning this on requires adding `?secret=...` there too,
-// which isn't something this code can do on its own.
+// /events doesn't run through requireAuth — it's Africa's Talking's own
+// webhook callback, which can't carry an agent's session cookie. Opt-in
+// (not enforced until the env var is set) because this URL is registered as
+// a static callback URL in Africa's Talking's own dashboard — turning this
+// on requires adding `?secret=...` there too, which isn't something this
+// code can do on its own.
 const AT_WEBHOOK_SECRET = process.env.AT_WEBHOOK_SECRET;
 function verifyAtWebhookSecret(req, res, next) {
     if (!AT_WEBHOOK_SECRET) {
@@ -76,11 +64,6 @@ function verifyAtWebhookSecret(req, res, next) {
     }
     next();
 }
-// Appended to every URL this app itself generates for Africa's Talking to
-// call back into (the standby loop's own redirects) — the one URL it can't
-// cover is /voice itself, since that's the static callback registered
-// directly in Africa's Talking's dashboard, not something built here.
-const secretParam = AT_WEBHOOK_SECRET ? `&secret=${AT_WEBHOOK_SECRET}` : '';
 
 // Routes
 apiRoutes(app, supabase, requireAuth, requireSupervisor);
@@ -99,131 +82,6 @@ app.get('/', (req, res) => {
 // Old server-rendered dashboard is gone — send bookmarks to the React app.
 app.get('/dashboard', (req, res) => {
     res.redirect('/app');
-});
-
-
-// 🔹 ENTRY — Africa's Talking's account-wide voice callback URL. Real
-// inbound customer calls no longer arrive here at all — they're routed by
-// a SIP trunk directly into the self-hosted Asterisk/ARI stack (see
-// ari-app/), which is why this no longer has an IVR-menu branch (the old
-// /ivr and /handle-input routes, and the ivr_config/ivr_options-reading
-// helpers they used, were removed with it). The only thing that can still
-// reach this URL is our own outbound call to a non-SIP-provisioned agent
-// going "available" (api.js's setAgentStatus, via lib/voice.js) — tagged
-// with clientRequestId `agent-standby:{id}` so it's identifiable here.
-//
-// NOTE: even that fallback is currently a dead end in practice — the
-// standby loop below (`/agent-standby-input`) dequeues from an Africa's
-// Talking `<Enqueue>` queue that only ever got populated by the
-// now-removed /handle-input. Nothing enqueues a caller into it anymore, so
-// an agent in this loop will always hear "No calls waiting." Left in place
-// since ripping it out entirely means deciding what a non-SIP agent going
-// "available" should do instead — a product decision, not a cleanup one.
-app.post('/voice', verifyAtWebhookSecret, (req, res) => {
-    res.set('Content-Type', 'application/xml');
-
-    const standbyMatch = /^agent-standby:(\d+)$/.exec(req.body.clientRequestId || '');
-
-    if (standbyMatch) {
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-                `<Redirect>${BASE_URL}/agent-standby?agentId=${standbyMatch[1]}${secretParam}</Redirect>` +
-            '</Response>');
-    }
-
-    // Confirmed live (2026-08-19): AT fires this same account-wide Voice URL
-    // a second time for any call that presents our AT-owned caller ID
-    // (OUTBOUND_CALLER_ID in ari-app) — including every outbound call placed
-    // through the self-hosted Asterisk SIP trunk, which AT has no idea is
-    // already being fully handled there. Responding <Hangup/> to that
-    // "Answered" notification — the old "nothing else should reach this
-    // URL" fallback below — was killing the call the instant the SIP side
-    // started ringing (visible in AT's own dashboard as a 0-duration
-    // "Aborted" session). This webhook has no useful instruction to give an
-    // outbound call; it's just along for the ride.
-    if (req.body.direction === 'Outbound') {
-        return res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
-    }
-
-    // A session-end notification carries nothing to act on — AT's own
-    // dashboard flags a Hangup sent in reply to one as an invalid action,
-    // since the call is already over by the time it arrives.
-    if (req.body.callSessionState === 'Completed') {
-        return res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
-    }
-
-    // Nothing else should be reaching this URL anymore.
-    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>');
-});
-
-
-// 🔹 AGENT STANDBY LOOP — reached when an agent answers the outbound call
-// placed by going "available" (see api.js). Keeps their line open and
-// listening for a digit press, which is the only way to trigger a Dequeue
-// (Africa's Talking has no API to inject new instructions into a live call
-// from our server — the trigger must come from inside the call itself).
-app.post('/agent-standby', verifyAtWebhookSecret, async (req, res) => {
-    const agentId = req.query.agentId;
-
-    await supabase.from('agents').update({ status: 'available' }).eq('id', agentId);
-
-    res.set('Content-Type', 'application/xml');
-    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-        '<Response>' +
-            '<Say>You are now online for Chumz support calls.</Say>' +
-            `<GetDigits timeout="${STANDBY_TIMEOUT}" numDigits="1" callbackUrl="${BASE_URL}/agent-standby-input?agentId=${agentId}${secretParam}">` +
-                '<Say>Press 1 to check for a waiting call.</Say>' +
-            '</GetDigits>' +
-            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}${secretParam}</Redirect>` +
-        '</Response>');
-});
-
-app.post('/agent-standby-input', verifyAtWebhookSecret, async (req, res) => {
-    const agentId = req.query.agentId;
-
-    res.set('Content-Type', 'application/xml');
-
-    // Whoever has been waiting longest — see the note in SYSTEM_DESIGN.md
-    // about this being a best-effort "who's next" indicator, not a
-    // guarantee: Dequeue itself decides who actually gets bridged, and if
-    // two agents check at nearly the same moment this read isn't atomic
-    // against that.
-    const { data: waiting } = await supabase
-        .from('call_logs')
-        .select('session_id')
-        .eq('status', 'queued')
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-    if (waiting) {
-        const { data: agent } = await supabase.from('agents').select('phone').eq('id', agentId).single();
-
-        // Mark the row 'ongoing' right here, at the exact moment we know
-        // it's actually being bridged — don't wait on /events to get there.
-        // /events sets 'ongoing' too, but only from a generic "is this call
-        // active" signal that can't tell "on hold in the queue" apart from
-        // "just bridged to an agent" (a caller in <Enqueue> is itself still
-        // an active call from AT's perspective) — see the guard there.
-        await Promise.all([
-            supabase.from('agents').update({ status: 'on_call' }).eq('id', agentId),
-            supabase.from('call_logs')
-                .update({ status: 'ongoing', agent_number: agent ? normalizePhone(agent.phone) : undefined })
-                .eq('session_id', waiting.session_id)
-        ]);
-
-        return res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<Response>' +
-                `<Dequeue name="${QUEUE_NAME}"/>` +
-                `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}${secretParam}</Redirect>` +
-            '</Response>');
-    }
-
-    res.send('<?xml version="1.0" encoding="UTF-8"?>' +
-        '<Response>' +
-            '<Say>No calls waiting right now.</Say>' +
-            `<Redirect>${BASE_URL}/agent-standby?agentId=${agentId}${secretParam}</Redirect>` +
-        '</Response>');
 });
 
 
@@ -254,9 +112,10 @@ app.post('/events', verifyAtWebhookSecret, async (req, res) => {
     // from "just bridged to an agent" — that would flip the row to 'ongoing'
     // the moment this fires while someone's still genuinely waiting,
     // vanishing them from the Live Queue page before any agent picked up.
-    // /agent-standby-input owns the real queued→ongoing transition (it
-    // knows for certain a Dequeue is happening); this only guards against
-    // this handler racing ahead of it.
+    // Real inbound calls are queued/bridged by ari-app now (see
+    // enterQueue/bridgeAgentLeg), which knows for certain when a Dequeue-
+    // equivalent bridge actually happens; this only guards against this
+    // handler racing ahead of that.
     const { data: existingRow } = await supabase
         .from('call_logs')
         .select('status')
@@ -267,14 +126,15 @@ app.post('/events', verifyAtWebhookSecret, async (req, res) => {
         status = 'queued';
     }
 
-    // Dial/standby legs to an agent land here as their own event. We tag
-    // them with agent_number for stats. Presence transitions to
-    // 'available'/'on_call' are owned by /agent-standby and
-    // /agent-standby-input (they know precisely what's happening); this
+    // Dial legs to an agent land here as their own event. We tag them with
+    // agent_number for stats. Presence transitions to 'available'/'on_call'
+    // are owned by ari-app (it knows precisely what's happening); this
     // handler only reacts to the whole call ending, since that's the one
     // agent-presence transition nothing else observes.
-    // NOTE: field name/behavior assumed from AT's docs — confirm against the
-    // "📡 EVENT" log on a live call before relying on this.
+    // NOTE: field name/behavior assumed from AT's docs, and unverified
+    // whether this handler still receives any traffic at all now that real
+    // calls route through the SIP trunk — confirm against the "📡 EVENT" log
+    // on a live call before relying on this for anything.
     const agentPhones = await getAgentPhones(supabase, normalizePhone);
     const matchedAgent = agentPhones.find(a => a.normalized === destination);
 
