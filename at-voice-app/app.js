@@ -26,8 +26,8 @@ process.on('unhandledRejection', reason => {
 });
 
 // A genuinely uncaught synchronous exception means some code ran in a state
-// nothing anticipated — safer to log it and let the process exit (Render
-// restarts the container automatically) than to keep serving requests from
+// nothing anticipated — safer to log it and let the process exit (DigitalOcean
+// App Platform restarts the container automatically) than to keep serving requests from
 // a process whose state integrity is no longer guaranteed.
 process.on('uncaughtException', err => {
     console.error('❌ Uncaught exception, exiting:', err);

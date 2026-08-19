@@ -3,7 +3,7 @@
 // single callback just to check "is this leg's destination an agent?".
 //
 // Known limitation: this cache is per-process. If this app is ever scaled
-// to multiple Render instances, each instance's cache can drift from the
+// to multiple DigitalOcean App Platform instances, each instance's cache can drift from the
 // others for up to TTL_MS. The short TTL bounds the staleness; a real fix
 // (if that ever matters) is a shared cache like Redis.
 const TTL_MS = 30 * 1000;

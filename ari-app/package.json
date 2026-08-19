@@ -2,7 +2,7 @@
   "name": "chumz-ari-app",
   "version": "1.0.0",
   "private": true,
-  "description": "Real-time call-control app for the self-hosted Asterisk box (sip.chumz.online). Runs on the Asterisk VPS itself, not Render — connects to ARI over localhost and to Supabase over HTTPS for the same agents/ivr_config/call_logs data the main app uses.",
+  "description": "Real-time call-control app for the self-hosted Asterisk box (sip.chumz.online). Runs on the Asterisk VPS itself, not DigitalOcean App Platform (where the main dashboard app runs) — connects to ARI over localhost and to Supabase over HTTPS for the same agents/ivr_config/call_logs data the main app uses.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

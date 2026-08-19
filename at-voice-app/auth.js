@@ -267,7 +267,7 @@ module.exports = function (app, supabase) {
         if (missingEnvVars.length) {
             return res.status(500).send(
                 `Google SSO is misconfigured on the server — missing: ${missingEnvVars.join(', ')}. ` +
-                `Set these in Render's Environment tab and redeploy.`
+                `Set these in the DigitalOcean App Platform environment settings and redeploy.`
             );
         }
 

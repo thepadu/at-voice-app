@@ -33,7 +33,7 @@ This describes the system as it exists today, not a history of how it got here. 
                                              │
                                              │
 ┌────────────────────────────────────────────┴──────────────┐
-│  Express (Render): app.js                                  │
+│  Express (DigitalOcean App Platform): app.js                │
 │    ├── api.js      JSON API for the React dashboard         │
 │    ├── auth.js     Google SSO + role/agentId resolution     │
 │    ├── lib/voice.js  Africa's Talking calling helper         │
@@ -49,7 +49,7 @@ This describes the system as it exists today, not a history of how it got here. 
 
 Two separate Node processes, two separate hosts:
 - **`ari-app/`** runs on the same Ubuntu 24.04 VPS as Asterisk itself (`sip.chumz.online`), started via systemd (`chumz-ari-app.service`, `Restart=always`). This is where all real-time call control lives — it talks to Asterisk over ARI (a WebSocket for events, REST for commands), and to Supabase for everything the dashboard needs to see.
-- **`at-voice-app/`** (Express) runs on Render. It serves the React dashboard, the JSON API the dashboard calls, Google OAuth, and a small legacy fallback (see "Legacy Africa's Talking fallback" below). It does **not** handle any live call audio or signaling — that's entirely the ARI app's job.
+- **`at-voice-app/`** (Express) runs on DigitalOcean App Platform, at `calls.chumz.online` (migrated from Render). It serves the React dashboard, the JSON API the dashboard calls, Google OAuth, and a small legacy fallback (see "Legacy Africa's Talking fallback" below). It does **not** handle any live call audio or signaling — that's entirely the ARI app's job.
 
 Both processes talk to the **same Supabase project** with the `service_role` key (bypasses RLS at the Postgres role level — RLS policy content is a non-issue for either process).
 

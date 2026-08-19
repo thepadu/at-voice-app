@@ -300,7 +300,7 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
     // (Dashboard and Analytics) was permanently empty.
     app.get('/api/calls/by-hour', requireAuth, async (req, res) => {
         // setHours()/getHours() run in the server's own timezone (UTC on
-        // Render), not Nairobi's — shifting every bucket by however far off
+        // DigitalOcean App Platform), not Nairobi's — shifting every bucket by however far off
         // that is and misattributing the hours right around Nairobi midnight
         // to the wrong calendar day. ari-app's isWithinBusinessHours has the
         // exact same hazard and solves it the same way: manually apply the

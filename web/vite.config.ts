@@ -5,7 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 // base: '/app/' because Express serves this build under /app (see app.js) —
 // dashboard.js has been retired, so the old HTML dashboard no longer
 // competes for a URL, but the SPA stays at /app rather than / since / is a
-// plain-text health check Render may depend on.
+// plain-text health check DigitalOcean App Platform may depend on.
 export default defineConfig({
     plugins: [
         react(),
