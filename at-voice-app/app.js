@@ -85,6 +85,25 @@ app.get('/dashboard', (req, res) => {
 });
 
 
+// 🔹 VOICE — Africa's Talking's account-wide Voice callback URL. Confirmed
+// live (2026-08-19) that this is NOT dead despite real call handling being
+// entirely the SIP trunk's job now: AT fires this same URL for any call
+// that presents an AT-owned caller ID at all — including every outbound
+// call placed through the self-hosted Asterisk SIP trunk — and requires a
+// *valid* XML response or it aborts the call outright. Tried removing this
+// route entirely first; that made AT's own webhook get a 404 instead of an
+// answer, which killed the call exactly as dead as the old <Hangup/>
+// fallback did (both visible in AT's own dashboard as a 0-duration
+// "Aborted" session with a 480 on the SIP side seconds after ringing
+// started). There is nothing left for this to actually control — the SIP
+// trunk already fully owns the call — so unconditionally acknowledging is
+// correct, not a placeholder for logic still to come.
+app.post('/voice', verifyAtWebhookSecret, (req, res) => {
+    res.set('Content-Type', 'application/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+});
+
+
 // 🔹 EVENTS CALLBACK (UPSERT)
 app.post('/events', verifyAtWebhookSecret, async (req, res) => {
     console.log('📡 EVENT:', req.body);
