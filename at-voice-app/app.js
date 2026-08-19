@@ -131,6 +131,27 @@ app.post('/voice', verifyAtWebhookSecret, (req, res) => {
             '</Response>');
     }
 
+    // Confirmed live (2026-08-19): AT fires this same account-wide Voice URL
+    // a second time for any call that presents our AT-owned caller ID
+    // (OUTBOUND_CALLER_ID in ari-app) — including every outbound call placed
+    // through the self-hosted Asterisk SIP trunk, which AT has no idea is
+    // already being fully handled there. Responding <Hangup/> to that
+    // "Answered" notification — the old "nothing else should reach this
+    // URL" fallback below — was killing the call the instant the SIP side
+    // started ringing (visible in AT's own dashboard as a 0-duration
+    // "Aborted" session). This webhook has no useful instruction to give an
+    // outbound call; it's just along for the ride.
+    if (req.body.direction === 'Outbound') {
+        return res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+
+    // A session-end notification carries nothing to act on — AT's own
+    // dashboard flags a Hangup sent in reply to one as an invalid action,
+    // since the call is already over by the time it arrives.
+    if (req.body.callSessionState === 'Completed') {
+        return res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+
     // Nothing else should be reaching this URL anymore.
     res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>');
 });
