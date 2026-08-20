@@ -1,3 +1,4 @@
+import { TriangleAlert } from 'lucide-react';
 import { useModalA11y } from '../lib/useModalA11y';
 
 type ConfirmDialogProps = {
@@ -33,7 +34,10 @@ export default function ConfirmDialog({
                 aria-labelledby="confirm-title"
                 onClick={e => e.stopPropagation()}
             >
-                <h3 id="confirm-title">{title}</h3>
+                <h3 id="confirm-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {danger && <TriangleAlert size={18} color="var(--danger)" aria-hidden="true" />}
+                    {title}
+                </h3>
                 <p>{message}</p>
                 <div className="modal-actions">
                     <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>

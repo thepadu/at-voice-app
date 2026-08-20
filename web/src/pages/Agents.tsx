@@ -203,6 +203,7 @@ export default function Agents() {
                             Phone
                             <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="0712345678" />
                         </label>
+                        <p className="hint" style={{ marginTop: -10 }}>Either 0712345678 or +254712345678 works.</p>
                         <label>
                             Email (optional — links their Google login)
                             <input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="agent@chumz.io" />

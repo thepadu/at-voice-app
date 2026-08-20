@@ -19,7 +19,7 @@ const IvrEditor = lazy(() => import('./pages/IvrEditor'));
 const CallForwarding = lazy(() => import('./pages/CallForwarding'));
 
 function RequireSupervisor({ children }: { children: ReactNode }) {
-    const { user, loading, isSupervisor } = useAuth();
+    const { user, loading, isSupervisor, checkFailed } = useAuth();
 
     if (loading) return null;
     if (!isSupervisor) {
@@ -27,8 +27,12 @@ function RequireSupervisor({ children }: { children: ReactNode }) {
             <div className="panel">
                 <h3>Supervisors only</h3>
                 <p className="hint">
-                    {user ? `Signed in as ${user.email}, role: agent.` : 'Not signed in.'} This page needs
-                    supervisor access.
+                    {checkFailed
+                        ? "Couldn't verify your session — try refreshing."
+                        : user
+                            ? `Signed in as ${user.email}, role: agent.`
+                            : 'Not signed in.'}{' '}
+                    This page needs supervisor access.
                 </p>
             </div>
         );

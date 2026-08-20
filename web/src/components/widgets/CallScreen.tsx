@@ -231,7 +231,11 @@ export default function CallScreen() {
     return (
         <div className="call-screen-stack">
             {phase && (
-            <div className={`call-screen call-screen-${phase} ${phase === 'incoming' && !hasGestured ? 'call-screen-pulse' : ''}`}>
+            <div
+                className={`call-screen call-screen-${phase} ${phase === 'incoming' && !hasGestured ? 'call-screen-pulse' : ''}`}
+                role={phase === 'incoming' ? 'alert' : undefined}
+                aria-live={phase === 'incoming' ? 'assertive' : undefined}
+            >
                 <div className="call-screen-avatar-wrap">
                     {phase === 'incoming' && <span className="call-screen-ripple" />}
                     <div className="call-screen-avatar">

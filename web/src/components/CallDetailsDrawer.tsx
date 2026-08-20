@@ -64,7 +64,11 @@ export default function CallDetailsDrawer({ call, onClose }: { call: Call | null
                     </div>
                     <div>
                         <span className="call-details-label">Rating</span>
-                        {call.rating ? '⭐'.repeat(call.rating) : '—'}
+                        {call.rating ? (
+                            <span aria-label={`${call.rating} out of 5 stars`}>
+                                <span aria-hidden="true">{'⭐'.repeat(call.rating)}</span>
+                            </span>
+                        ) : '—'}
                     </div>
                     <div>
                         <span className="call-details-label">Duration</span>

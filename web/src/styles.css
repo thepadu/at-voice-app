@@ -806,6 +806,29 @@ textarea {
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
 }
 
+.error-boundary {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--page-bg);
+}
+
+.error-boundary-card {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 28px;
+    width: 100%;
+    max-width: 420px;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.error-boundary-card h3 {
+    margin-top: 0;
+}
+
 .modal h3 {
     margin-top: 0;
 }
@@ -878,13 +901,35 @@ textarea {
 }
 
 .toast {
-    padding: 12px 18px;
+    padding: 12px 14px 12px 18px;
     border-radius: 8px;
     color: white;
     font-size: 13px;
     font-weight: 600;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
     animation: toast-in 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.toast-message {
+    flex: 1;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    color: white;
+    opacity: 0.75;
+    padding: 2px;
+    display: flex;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.toast-close:hover {
+    opacity: 1;
 }
 
 .toast-success {
