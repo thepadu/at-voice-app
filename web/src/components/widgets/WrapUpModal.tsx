@@ -4,20 +4,41 @@ import { apiFetch } from '../../lib/api';
 import { useActiveCall } from '../../lib/activeCall';
 import { useToast } from '../../lib/toast';
 import { useModalA11y } from '../../lib/useModalA11y';
+import { TICKET_PRIORITIES } from '../../lib/ticketStatus';
 
 const DISPOSITIONS = ['Resolved', 'Escalated', 'Follow-up needed', 'No resolution'];
+
+// A pick here is just a starting point the agent can override below — not
+// a rule — but "Escalated"/"Follow-up needed" defaulting to the same
+// Medium as "Resolved" meant a genuinely urgent call needed a second trip
+// into the ticket later just to raise its own priority.
+const DEFAULT_PRIORITY: Record<string, string> = {
+    Resolved: 'Medium',
+    Escalated: 'High',
+    'Follow-up needed': 'Medium',
+    'No resolution': 'Medium'
+};
 
 export default function WrapUpModal() {
     const { justEnded, lastCall, dismissJustEnded } = useActiveCall();
     const [disposition, setDisposition] = useState('Resolved');
+    const [priority, setPriority] = useState(DEFAULT_PRIORITY.Resolved);
+    const [notes, setNotes] = useState('Logged from call wrap-up.');
     const showToast = useToast();
 
     // Same reasoning as TicketDrawer's reset — this modal stays mounted
-    // between calls, so a disposition picked (or left) for one call would
-    // otherwise still be selected by default for the next one.
+    // between calls, so a disposition/priority/note picked (or left) for
+    // one call would otherwise still be sitting there for the next one.
     useEffect(() => {
         setDisposition('Resolved');
+        setPriority(DEFAULT_PRIORITY.Resolved);
+        setNotes('Logged from call wrap-up.');
     }, [lastCall?.session_id]);
+
+    function pickDisposition(d: string) {
+        setDisposition(d);
+        setPriority(DEFAULT_PRIORITY[d] ?? 'Medium');
+    }
 
     const finish = useMutation({
         mutationFn: () =>
@@ -26,9 +47,9 @@ export default function WrapUpModal() {
                 body: JSON.stringify({
                     session_id: lastCall?.session_id,
                     caller_number: lastCall?.caller,
-                    priority: 'Medium',
+                    priority,
                     status: disposition,
-                    notes: `Logged from call wrap-up.`
+                    notes
                 })
             }),
         onSuccess: () => {
@@ -53,15 +74,27 @@ export default function WrapUpModal() {
                         <button
                             key={d}
                             className={d === disposition ? 'chip chip-selected' : 'chip'}
-                            onClick={() => setDisposition(d)}
+                            onClick={() => pickDisposition(d)}
                         >
                             {d}
                         </button>
                     ))}
                 </div>
 
+                <label>
+                    Priority
+                    <select value={priority} onChange={e => setPriority(e.target.value)}>
+                        {TICKET_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                </label>
+
+                <label>
+                    Notes
+                    <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
+                </label>
+
                 <div className="modal-actions">
-                    <button className="btn btn-secondary" onClick={dismissJustEnded}>Back to call</button>
+                    <button className="btn btn-secondary" onClick={dismissJustEnded}>Dismiss</button>
                     <button className="btn btn-primary" onClick={() => finish.mutate()} disabled={finish.isPending}>
                         Finish &amp; log call
                     </button>

@@ -6,6 +6,7 @@ import { useActiveCall } from '../../lib/activeCall';
 import { apiFetch } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { formatPhone, isValidPhone } from '../../lib/phoneFormat';
+import { formatDuration } from '../../lib/duration';
 import TicketDrawer from './TicketDrawer';
 
 // Browsers block audio autoplay until the page has seen at least one user
@@ -108,13 +109,6 @@ function useCallNotification(incomingCall: { callerNumber: string } | null) {
             });
         }
     }, [incomingCall]);
-}
-
-function formatDuration(sec: number) {
-    const safeSec = Number.isFinite(sec) && sec > 0 ? Math.floor(sec) : 0;
-    const m = Math.floor(safeSec / 60);
-    const s = safeSec % 60;
-    return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 const ADD_PARTY_LABELS: Record<string, string> = {

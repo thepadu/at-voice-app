@@ -80,7 +80,7 @@ export default function Tickets() {
 
     function selectCall(call: Call) {
         setSelectedCall(call);
-        setTag(tags[0] ?? '');
+        setTag('');
         setPriority('Medium');
         setAssignedAgentId('');
         setNotes('');
@@ -93,7 +93,7 @@ export default function Tickets() {
                 body: JSON.stringify({
                     session_id: selectedCall?.session_id,
                     caller_number: selectedCall?.caller,
-                    tag,
+                    tag: tag || (tags[0] ?? null),
                     priority,
                     assigned_agent_id: assignedAgentId || null,
                     notes
@@ -265,6 +265,7 @@ export default function Tickets() {
                         <label>
                             Tag
                             <select value={tag} onChange={e => setTag(e.target.value)}>
+                                <option value="">Select…</option>
                                 {tags.map(t => <option key={t} value={t}>{t}</option>)}
                             </select>
                         </label>

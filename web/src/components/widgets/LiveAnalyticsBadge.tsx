@@ -41,8 +41,9 @@ export default function LiveAnalyticsBadge() {
                 className="fab fab-analytics"
                 onClick={() => setOpen(o => !o)}
                 aria-expanded={open}
+                aria-label="Today's stats"
             >
-                📊 Live Analytics
+                <span aria-hidden="true">📊</span> Today's Stats
             </button>
         </div>
     );

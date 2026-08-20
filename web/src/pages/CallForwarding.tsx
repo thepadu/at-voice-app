@@ -154,6 +154,7 @@ function BusinessHoursPanel() {
 function CallRatingPanel() {
     const queryClient = useQueryClient();
     const showToast = useToast();
+    const [confirmingEnable, setConfirmingEnable] = useState(false);
 
     const { data } = useQuery({ queryKey: ['ivr-config'], queryFn: () => apiFetch('/api/ivr-config') });
 
@@ -166,6 +167,14 @@ function CallRatingPanel() {
         },
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
     });
+
+    // Only turning it *on* needs a confirm — it's the direction that
+    // immediately changes what every caller hears at the end of a call.
+    // Turning it back off is always safe to do without one.
+    function handleChange(checked: boolean) {
+        if (checked) setConfirmingEnable(true);
+        else toggle.mutate(false);
+    }
 
     return (
         <div className="panel panel-header">
@@ -180,10 +189,22 @@ function CallRatingPanel() {
                 <input
                     type="checkbox"
                     checked={!!data?.rating_enabled}
-                    onChange={e => toggle.mutate(e.target.checked)}
+                    onChange={e => handleChange(e.target.checked)}
                 />
                 <span className="toggle-track"><span className="toggle-knob" /></span>
             </label>
+
+            <ConfirmDialog
+                open={confirmingEnable}
+                title="Turn on call rating?"
+                message="Every caller will hear a 1-5 rating prompt right before the line disconnects, starting with the next call. This takes effect immediately."
+                confirmLabel="Turn on"
+                onConfirm={() => {
+                    toggle.mutate(true);
+                    setConfirmingEnable(false);
+                }}
+                onCancel={() => setConfirmingEnable(false)}
+            />
         </div>
     );
 }
@@ -200,6 +221,7 @@ export default function CallForwarding() {
     const [newCondition, setNewCondition] = useState('no_answer');
     const [newDestination, setNewDestination] = useState('');
     const [pendingDelete, setPendingDelete] = useState<Rule | null>(null);
+    const [confirmingEnable, setConfirmingEnable] = useState(false);
 
     const toggleEnabled = useMutation({
         mutationFn: (enabled: boolean) => apiFetch('/api/forwarding-config', { method: 'PATCH', body: JSON.stringify({ enabled }) }),
@@ -209,6 +231,14 @@ export default function CallForwarding() {
         },
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
     });
+
+    // Same reasoning as the call-rating toggle above — enabling forwarding
+    // immediately changes live call routing, disabling it doesn't need the
+    // same guard.
+    function handleToggleForwarding(checked: boolean) {
+        if (checked) setConfirmingEnable(true);
+        else toggleEnabled.mutate(false);
+    }
 
     const addRule = useMutation({
         mutationFn: () =>
@@ -244,11 +274,23 @@ export default function CallForwarding() {
                     <input
                         type="checkbox"
                         checked={!!configData?.enabled}
-                        onChange={e => toggleEnabled.mutate(e.target.checked)}
+                        onChange={e => handleToggleForwarding(e.target.checked)}
                     />
                     <span className="toggle-track"><span className="toggle-knob" /></span>
                 </label>
             </div>
+
+            <ConfirmDialog
+                open={confirmingEnable}
+                title="Turn on call forwarding?"
+                message="Calls will start routing according to the rules below the moment this is on. This takes effect immediately."
+                confirmLabel="Turn on"
+                onConfirm={() => {
+                    toggleEnabled.mutate(true);
+                    setConfirmingEnable(false);
+                }}
+                onCancel={() => setConfirmingEnable(false)}
+            />
 
             <div className="panel">
                 <div className="panel-header">

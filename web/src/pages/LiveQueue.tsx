@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
+import { formatDuration as formatWait } from '../lib/duration';
 
 type QueuedCall = {
     session_id: string;
@@ -7,12 +8,6 @@ type QueuedCall = {
     waitSeconds: number;
     stage: 'Waiting' | 'In Menu';
 };
-
-function formatWait(sec: number) {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}:${String(s).padStart(2, '0')}`;
-}
 
 // SLA coloring only applies once a caller is actually on hold — someone
 // still navigating the IVR menu isn't "late" yet.

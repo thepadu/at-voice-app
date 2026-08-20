@@ -280,22 +280,6 @@ h1, h2, h3, h4 {
     gap: 16px;
 }
 
-.topbar-search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--page-bg);
-    border-radius: 8px;
-    padding: 8px 12px;
-    color: var(--secondary);
-    font-size: 13px;
-    width: 200px;
-}
-
-.topbar-search-icon {
-    opacity: 0.7;
-}
-
 .topbar-badge {
     display: flex;
     align-items: center;
@@ -1824,10 +1808,6 @@ textarea {
     .topbar {
         padding: 0 16px;
         padding-top: env(safe-area-inset-top);
-    }
-
-    .topbar-search {
-        display: none;
     }
 
     .app-content {

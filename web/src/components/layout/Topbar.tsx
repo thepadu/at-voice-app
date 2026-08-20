@@ -1,6 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Menu, Search, Sun, Moon } from 'lucide-react';
+import { Menu, Sun, Moon } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useTheme } from '../../lib/theme';
 import { useAuth } from '../../lib/auth';
@@ -35,7 +35,7 @@ const CONNECTION_COLORS: Record<RegistrationState, string> = {
     failed: '#EF5350'
 };
 
-export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
+export default function Topbar({ onMenuClick, menuOpen }: { onMenuClick: () => void; menuOpen: boolean }) {
     const location = useLocation();
     const { darkMode, toggleDarkMode } = useTheme();
     const { user } = useAuth();
@@ -52,18 +52,17 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     return (
         <header className="topbar">
             <div className="topbar-left">
-                <button className="topbar-menu-btn" onClick={onMenuClick} aria-label="Open menu">
+                <button
+                    className="topbar-menu-btn"
+                    onClick={onMenuClick}
+                    aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+                    aria-expanded={menuOpen}
+                >
                     <Menu size={20} />
                 </button>
                 <div className="topbar-title">{title}</div>
             </div>
             <div className="topbar-right">
-                <div className="topbar-search">
-                    <span className="topbar-search-icon" aria-hidden="true">
-                        <Search size={16} />
-                    </span>
-                    Search calls, agents…
-                </div>
                 <div className="topbar-badge">
                     <span className="topbar-badge-dot" />
                     {data?.count ?? '—'} agents live

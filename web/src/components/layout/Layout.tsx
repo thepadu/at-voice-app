@@ -32,11 +32,11 @@ export default function Layout({ children }: { children: ReactNode }) {
             {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
             <CallScreen />
             <div className="app-shell-main">
-                <Topbar onMenuClick={() => setSidebarOpen(o => !o)} />
+                <Topbar onMenuClick={() => setSidebarOpen(o => !o)} menuOpen={sidebarOpen} />
                 {micPermissionDenied && (
                     <div className="mic-permission-banner">
-                        Microphone access is blocked — you won't be able to answer calls until it's allowed in this
-                        browser's site settings.
+                        Microphone access is blocked — you won't be able to answer calls until it's allowed. Click the
+                        lock or site-info icon next to the address bar, allow Microphone, then reload this page.
                     </div>
                 )}
                 <main className="app-content">{children}</main>
