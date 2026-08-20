@@ -124,6 +124,18 @@ function isWithinBusinessHours(hours) {
     return minutesNow >= openMinutes && minutesNow < closeMinutes;
 }
 
+// A load test proved this apparently-rare failure isn't actually rare under
+// load: a CPU-saturated box can make Asterisk report a perfectly good cached
+// file as "failed" simply because it couldn't service the playback in time,
+// not because the file is corrupt. A genuinely corrupt file fails
+// deterministically — every single play attempt, regardless of load — so
+// requiring a few CONSECUTIVE failures before invalidating (and resetting
+// the count on any success) tells the two apart: real corruption racks up
+// consecutive failures fast, while overload-induced ones land sporadically,
+// interspersed with successes, and never reach the threshold on their own.
+const PLAYBACK_FAILURE_THRESHOLD = 3;
+const playbackFailureCounts = new Map(); // soundName -> consecutive failure count
+
 async function playText(channel, text, voiceOpts) {
     const soundName = await synthesize(text, voiceOpts);
     const playback = client.Playback();
@@ -165,12 +177,28 @@ async function playText(channel, text, voiceOpts) {
     // every caller across multiple days until manually deleted. Checking
     // the finished playback's own state and invalidating the cache on
     // anything but a clean finish makes that self-healing instead — the
-    // caller still hears nothing this one time, but the next caller gets a
+    // caller still hears nothing this one time, but a later caller gets a
     // freshly re-synthesized (hopefully good) file rather than the same
     // permanently-broken one.
     if (finished?.state && finished.state !== 'done') {
-        console.error(`❌ Playback finished in unexpected state "${finished.state}" for ${soundName} — invalidating cache`);
-        invalidate(text, voiceOpts);
+        const failures = (playbackFailureCounts.get(soundName) || 0) + 1;
+        if (failures >= PLAYBACK_FAILURE_THRESHOLD) {
+            console.error(
+                `❌ ${soundName} failed ${failures} times in a row — invalidating cache as likely corrupt`
+            );
+            invalidate(text, voiceOpts);
+            playbackFailureCounts.delete(soundName);
+        } else {
+            playbackFailureCounts.set(soundName, failures);
+            console.error(
+                `❌ Playback finished in unexpected state "${finished.state}" for ${soundName} (${failures}/${PLAYBACK_FAILURE_THRESHOLD} consecutive — not invalidating yet)`
+            );
+        }
+    } else if (finished) {
+        // A clean finish proves this exact file is fine right now — clears
+        // any failures accumulated from an earlier overload spike so they
+        // can never slowly add up to the threshold across unrelated events.
+        playbackFailureCounts.delete(soundName);
     }
 }
 
