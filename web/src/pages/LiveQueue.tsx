@@ -19,19 +19,18 @@ function waitRowClass(call: QueuedCall) {
 }
 
 export default function LiveQueue() {
-    // No refetchInterval here — Sidebar (always mounted in Layout) already
-    // polls this exact same query key every 5s. Adding a second independent
-    // interval on this page doesn't get deduped: two observers mounted at
-    // different times fire their timers out of phase, roughly doubling
-    // actual /api/queue traffic while this page is open. This still gets
-    // live updates for free, since both components observe the same cache
-    // entry and re-render whenever Sidebar's poll refreshes it.
+    // No refetchInterval here — GlobalPolling (mounted once in Layout, see
+    // lib/globalPolling.tsx) already owns both of these keys. Adding a
+    // second independent interval on this page doesn't get deduped: two
+    // observers mounted at different times fire their timers out of phase,
+    // roughly doubling actual traffic while this page is open. This still
+    // gets live updates for free, since every observer of the same cache
+    // entry re-renders whenever GlobalPolling's fetch refreshes it.
     const { data: queueData, isLoading: queueLoading } = useQuery({
         queryKey: ['queue'],
         queryFn: () => apiFetch('/api/queue')
     });
 
-    // Same reasoning — Topbar (always mounted) already drives this one.
     const { data: countData } = useQuery({
         queryKey: ['agents-available-count'],
         queryFn: () => apiFetch('/api/agents/available-count')

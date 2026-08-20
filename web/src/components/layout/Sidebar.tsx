@@ -18,10 +18,12 @@ type SidebarProps = { open: boolean; onClose: () => void };
 export default function Sidebar({ open, onClose }: SidebarProps) {
     const { user, isSupervisor } = useAuth();
 
+    // GlobalPolling (mounted once in Layout) owns the actual refetch
+    // interval for this key — this just reads whatever's in the cache and
+    // re-renders when it refreshes.
     const { data: queueData } = useQuery({
         queryKey: ['queue'],
-        queryFn: () => apiFetch('/api/queue'),
-        refetchInterval: 5000
+        queryFn: () => apiFetch('/api/queue')
     });
 
     const inQueue = queueData?.stats?.inQueue ?? 0;

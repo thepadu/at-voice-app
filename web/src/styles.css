@@ -35,6 +35,34 @@
     --danger-dark: #C2185B;
     --warning: #F39C12;
     --tint: #E0F5F2;
+
+    /* Spacing — an inventory of the values already in real use across this
+       file (each appeared 2+ times), named after their own pixel value
+       rather than an abstract 1/2/3 index so reaching for one doesn't need
+       a lookup. This isn't a from-scratch design-system scale — the values
+       themselves are unchanged, nothing here alters layout — it exists so
+       new spacing decisions have a documented set to choose from instead
+       of typing another one-off number, and so a future deliberate
+       consolidation pass has one place to edit instead of hunting through
+       ~150 declarations. True one-offs (a value used exactly once) were
+       left as plain pixels rather than given a token nobody else will
+       ever reach for. */
+    --space-2: 2px;
+    --space-4: 4px;
+    --space-5: 5px;
+    --space-6: 6px;
+    --space-8: 8px;
+    --space-9: 9px;
+    --space-10: 10px;
+    --space-12: 12px;
+    --space-14: 14px;
+    --space-15: 15px;
+    --space-16: 16px;
+    --space-18: 18px;
+    --space-20: 20px;
+    --space-22: 22px;
+    --space-24: 24px;
+    --space-28: 28px;
 }
 
 :root.dark {
@@ -87,7 +115,7 @@ h1, h2, h3, h4 {
 .app-content {
     flex: 1;
     overflow: auto;
-    padding: 28px;
+    padding: var(--space-28);
     max-width: 1200px;
     width: 100%;
     margin: 0 auto;
@@ -108,7 +136,7 @@ h1, h2, h3, h4 {
     color: #F5F5F5;
     display: flex;
     flex-direction: column;
-    padding: 22px 14px;
+    padding: var(--space-22) var(--space-14);
     padding-top: calc(22px + env(safe-area-inset-top));
     padding-left: calc(14px + env(safe-area-inset-left));
 }
@@ -123,7 +151,7 @@ h1, h2, h3, h4 {
 .sidebar-logo {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-10);
     padding: 0 8px 26px;
 }
 
@@ -157,7 +185,7 @@ h1, h2, h3, h4 {
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 10px 12px;
+    padding: var(--space-10) var(--space-12);
     border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
@@ -177,11 +205,11 @@ h1, h2, h3, h4 {
 
 .sidebar-footer {
     margin-top: auto;
-    padding-top: 16px;
+    padding-top: var(--space-16);
     border-top: 1px solid #3A4A59;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-10);
 }
 
 .sidebar-avatar {
@@ -221,7 +249,7 @@ h1, h2, h3, h4 {
     color: #9E9E9E;
     text-decoration: none;
     font-size: 16px;
-    padding: 4px;
+    padding: var(--space-4);
 }
 
 .sidebar-logout:hover {
@@ -240,13 +268,13 @@ h1, h2, h3, h4 {
     justify-content: space-between;
     padding: 0 28px;
     padding-top: env(safe-area-inset-top);
-    gap: 12px;
+    gap: var(--space-12);
 }
 
 .topbar-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-12);
     min-width: 0;
 }
 
@@ -270,23 +298,23 @@ h1, h2, h3, h4 {
     font-size: 20px;
     color: var(--ink);
     cursor: pointer;
-    padding: 4px 6px;
+    padding: var(--space-4) var(--space-6);
     flex-shrink: 0;
 }
 
 .topbar-right {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: var(--space-16);
 }
 
 .topbar-badge {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-6);
     background: var(--tint);
     color: var(--brand-text);
-    padding: 6px 12px;
+    padding: var(--space-6) var(--space-12);
     border-radius: 20px;
     font-size: 12px;
     font-weight: 700;
@@ -309,11 +337,11 @@ h1, h2, h3, h4 {
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-6);
     background: var(--page-bg);
     color: var(--secondary);
     border: none;
-    padding: 6px 12px;
+    padding: var(--space-6) var(--space-12);
     border-radius: 20px;
     font-size: 12px;
     font-weight: 700;
@@ -328,7 +356,7 @@ h1, h2, h3, h4 {
     color: #fff;
     font-size: 13px;
     font-weight: 600;
-    padding: 10px 20px;
+    padding: var(--space-10) var(--space-20);
     text-align: center;
 }
 
@@ -337,13 +365,13 @@ h1, h2, h3, h4 {
 .cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 15px;
+    gap: var(--space-15);
     margin-bottom: 25px;
 }
 
 .card {
     background: var(--surface);
-    padding: 18px;
+    padding: var(--space-18);
     border-radius: 12px;
     border: 1px solid var(--border);
 }
@@ -353,7 +381,7 @@ h1, h2, h3, h4 {
     font-size: 26px;
     font-weight: 800;
     color: var(--ink);
-    margin: 6px 0 4px;
+    margin: var(--space-6) 0 4px;
 }
 
 .card-label {
@@ -364,8 +392,8 @@ h1, h2, h3, h4 {
 
 .card-multi-stats {
     display: flex;
-    gap: 14px;
-    margin-top: 8px;
+    gap: var(--space-14);
+    margin-top: var(--space-8);
 }
 
 .card-multi-stat {
@@ -387,9 +415,9 @@ h1, h2, h3, h4 {
 
 .panel {
     background: var(--surface);
-    padding: 20px;
+    padding: var(--space-20);
     border-radius: 12px;
-    margin-bottom: 20px;
+    margin-bottom: var(--space-20);
     border: 1px solid var(--border);
 }
 
@@ -416,7 +444,7 @@ table {
 }
 
 th, td {
-    padding: 12px 14px;
+    padding: var(--space-12) var(--space-14);
     text-align: left;
 }
 
@@ -444,26 +472,26 @@ tr:not(:last-child) td {
 .empty {
     text-align: center;
     color: var(--muted);
-    padding: 16px;
+    padding: var(--space-16);
 }
 
 .hint {
     color: var(--muted);
     font-size: 13px;
-    margin-top: -6px;
-    margin-bottom: 16px;
+    margin-top: calc(-1 * var(--space-6));
+    margin-bottom: var(--space-16);
 }
 
 .tabs {
     display: flex;
-    gap: 8px;
-    margin-bottom: 15px;
+    gap: var(--space-8);
+    margin-bottom: var(--space-15);
 }
 
 .tab {
     background: var(--surface);
     border: 1px solid var(--border);
-    padding: 8px 16px;
+    padding: var(--space-8) var(--space-16);
     border-radius: 20px;
     cursor: pointer;
     font-size: 13px;
@@ -498,7 +526,7 @@ tr:not(:last-child) td {
     display: flex;
     align-items: flex-end;
     flex-wrap: wrap;
-    gap: 16px;
+    gap: var(--space-16);
 }
 
 .calls-filters label {
@@ -512,14 +540,14 @@ tr:not(:last-child) td {
 
 .calls-filter-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--space-8);
 }
 
 .calls-row-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--space-6);
 }
 
 /* A caption sitting directly under a StatusPill or timestamp in the same
@@ -530,7 +558,7 @@ tr:not(:last-child) td {
 .calls-row-caption {
     color: var(--muted);
     font-size: 13px;
-    margin: 2px 0 0;
+    margin: var(--space-2) 0 0;
 }
 
 /* Hidden by default (desktop shows the table above) — swapped in under the
@@ -542,7 +570,7 @@ tr:not(:last-child) td {
 }
 
 .call-card {
-    padding: 12px 0;
+    padding: var(--space-12) 0;
     border-top: 1px solid var(--border);
 }
 
@@ -553,7 +581,7 @@ tr:not(:last-child) td {
 .call-card-top {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-8);
 }
 
 .call-card-caller {
@@ -570,15 +598,15 @@ tr:not(:last-child) td {
     justify-content: space-between;
     color: var(--muted);
     font-size: 12px;
-    margin-top: 6px;
+    margin-top: var(--space-6);
 }
 
 .call-card-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 8px;
-    margin-top: 8px;
+    gap: var(--space-8);
+    margin-top: var(--space-8);
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
@@ -587,7 +615,7 @@ tr:not(:last-child) td {
     font-family: inherit;
     font-size: 13px;
     font-weight: 600;
-    padding: 9px 16px;
+    padding: var(--space-9) var(--space-16);
     border-radius: 8px;
     border: none;
     cursor: pointer;
@@ -629,7 +657,7 @@ tr:not(:last-child) td {
 
 .btn-link {
     background: none;
-    padding: 4px 8px;
+    padding: var(--space-4) var(--space-8);
     color: var(--brand-text);
     text-decoration: none;
 }
@@ -637,7 +665,7 @@ tr:not(:last-child) td {
 .btn-icon {
     background: var(--page-bg);
     border: 1px solid var(--border);
-    padding: 6px;
+    padding: var(--space-6);
     color: var(--secondary);
     cursor: pointer;
     display: inline-flex;
@@ -657,14 +685,14 @@ tr:not(:last-child) td {
 
 .row-actions {
     display: flex;
-    gap: 4px;
+    gap: var(--space-4);
 }
 
 /* ── Status pill ───────────────────────────────────────────────────── */
 
 .status-pill {
     display: inline-block;
-    padding: 5px 12px;
+    padding: var(--space-5) var(--space-12);
     border-radius: 20px;
     color: white;
     font-size: 12px;
@@ -677,7 +705,7 @@ tr:not(:last-child) td {
     display: inline-flex;
     align-items: center;
     border-radius: 20px;
-    padding: 5px 22px 5px 12px;
+    padding: var(--space-5) var(--space-22) var(--space-5) var(--space-12);
 }
 
 .status-dropdown-disabled {
@@ -696,7 +724,7 @@ tr:not(:last-child) td {
     text-transform: capitalize;
     cursor: pointer;
     padding: 0;
-    padding-right: 2px;
+    padding-right: var(--space-2);
 }
 
 .status-dropdown-select:disabled {
@@ -722,7 +750,7 @@ tr:not(:last-child) td {
 
 .stage-badge {
     display: inline-block;
-    padding: 4px 10px;
+    padding: var(--space-4) var(--space-10);
     border-radius: 20px;
     font-size: 12px;
     font-weight: 600;
@@ -750,14 +778,14 @@ label {
     font-size: 13px;
     color: var(--secondary);
     font-weight: 600;
-    margin-bottom: 14px;
+    margin-bottom: var(--space-14);
 }
 
 input, select, textarea {
     display: block;
     width: 100%;
-    margin-top: 6px;
-    padding: 9px 10px;
+    margin-top: var(--space-6);
+    padding: var(--space-9) var(--space-10);
     border-radius: 8px;
     border: 1px solid var(--border);
     font-family: inherit;
@@ -792,13 +820,13 @@ textarea {
     align-items: center;
     justify-content: center;
     z-index: 100;
-    padding: 20px;
+    padding: var(--space-20);
 }
 
 .modal {
     background: var(--surface);
     border-radius: 12px;
-    padding: 28px;
+    padding: var(--space-28);
     width: 100%;
     max-width: 420px;
     max-height: 90vh;
@@ -811,14 +839,14 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: var(--space-24);
     background: var(--page-bg);
 }
 
 .error-boundary-card {
     background: var(--surface);
     border-radius: 12px;
-    padding: 28px;
+    padding: var(--space-28);
     width: 100%;
     max-width: 420px;
     text-align: center;
@@ -838,14 +866,14 @@ textarea {
 }
 
 .modal-lg h4 {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-8);
 }
 
 .call-details-summary {
     display: flex;
-    gap: 24px;
-    padding: 14px 0;
-    margin-bottom: 10px;
+    gap: var(--space-24);
+    padding: var(--space-14) 0;
+    margin-bottom: var(--space-10);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
 }
@@ -856,26 +884,26 @@ textarea {
     text-transform: uppercase;
     letter-spacing: 0.03em;
     color: var(--secondary);
-    margin-bottom: 4px;
+    margin-bottom: var(--space-4);
 }
 
 .call-details-ticket {
-    padding: 10px 0;
+    padding: var(--space-10) 0;
     border-bottom: 1px solid var(--border);
 }
 
 .call-details-ticket-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
+    gap: var(--space-8);
+    margin-bottom: var(--space-4);
 }
 
 .call-details-history-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 0;
+    padding: var(--space-8) 0;
     border-bottom: 1px solid var(--border);
     font-size: 13px;
     color: var(--secondary);
@@ -884,8 +912,8 @@ textarea {
 .modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
-    margin-top: 8px;
+    gap: var(--space-10);
+    margin-top: var(--space-8);
 }
 
 /* ── Toasts ────────────────────────────────────────────────────────── */
@@ -896,12 +924,12 @@ textarea {
     left: 20px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-8);
     z-index: 200;
 }
 
 .toast {
-    padding: 12px 14px 12px 18px;
+    padding: var(--space-12) var(--space-14) var(--space-12) var(--space-18);
     border-radius: 8px;
     color: white;
     font-size: 13px;
@@ -910,7 +938,7 @@ textarea {
     animation: toast-in 0.2s ease;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-12);
 }
 
 .toast-message {
@@ -922,7 +950,7 @@ textarea {
     border: none;
     color: white;
     opacity: 0.75;
-    padding: 2px;
+    padding: var(--space-2);
     display: flex;
     cursor: pointer;
     flex-shrink: 0;
@@ -950,16 +978,16 @@ textarea {
 .ivr-layout {
     display: grid;
     grid-template-columns: 1fr 340px;
-    gap: 20px;
+    gap: var(--space-20);
     align-items: start;
 }
 
 .ivr-row {
     display: grid;
     grid-template-columns: 40px 1fr auto;
-    gap: 16px;
+    gap: var(--space-16);
     align-items: start;
-    padding: 18px 0;
+    padding: var(--space-18) 0;
     border-top: 1px solid var(--border);
 }
 
@@ -983,31 +1011,31 @@ textarea {
 .ivr-row-fields {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-4);
 }
 
 .ivr-row-actions {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding-top: 4px;
+    gap: var(--space-8);
+    padding-top: var(--space-4);
 }
 
 .ivr-preview-greeting {
     border: 1px solid var(--brand-bright);
     background: var(--tint);
     border-radius: 8px;
-    padding: 10px 12px;
+    padding: var(--space-10) var(--space-12);
     font-size: 12px;
     color: var(--brand-dark);
-    margin-bottom: 12px;
+    margin-bottom: var(--space-12);
 }
 
 .ivr-preview-step {
     display: flex;
-    gap: 10px;
+    gap: var(--space-10);
     align-items: flex-start;
-    margin-bottom: 10px;
+    margin-bottom: var(--space-10);
 }
 
 .ivr-preview-key {
@@ -1040,20 +1068,20 @@ textarea {
 .agent-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 16px;
+    gap: var(--space-16);
 }
 
 .agent-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 18px;
+    padding: var(--space-18);
 }
 
 .agent-card-header {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-12);
 }
 
 .agent-avatar {
@@ -1087,13 +1115,13 @@ textarea {
 }
 
 .agent-card-status {
-    margin-top: 14px;
+    margin-top: var(--space-14);
 }
 
 .agent-card-actions {
     display: flex;
-    gap: 6px;
-    margin-top: 12px;
+    gap: var(--space-6);
+    margin-top: var(--space-12);
 }
 
 /* ── Floating widgets ──────────────────────────────────────────────── */
@@ -1127,7 +1155,7 @@ textarea {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 20px;
-    padding: 18px;
+    padding: var(--space-18);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
     /* Grows upward from a fixed bottom anchor with no cap otherwise — on
        any window shorter than roughly 660px (a non-maximized browser, a
@@ -1157,7 +1185,7 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: var(--space-10);
 }
 
 .dialer-popover-title {
@@ -1169,8 +1197,8 @@ textarea {
 .dialer-display-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 14px;
+    gap: var(--space-6);
+    margin-bottom: var(--space-14);
 }
 
 .dialer-country-code {
@@ -1197,7 +1225,7 @@ textarea {
     font-size: 22px;
     font-weight: 600;
     color: var(--ink);
-    padding: 4px 0;
+    padding: var(--space-4) 0;
 }
 
 .dialer-display:focus {
@@ -1212,7 +1240,7 @@ textarea {
     cursor: pointer;
     display: flex;
     align-items: center;
-    padding: 6px;
+    padding: var(--space-6);
     border-radius: 8px;
 }
 
@@ -1222,8 +1250,8 @@ textarea {
 }
 
 .dialer-recent {
-    margin-top: 12px;
-    padding-top: 10px;
+    margin-top: var(--space-12);
+    padding-top: var(--space-10);
     border-top: 1px solid var(--border);
 }
 
@@ -1232,7 +1260,7 @@ textarea {
     text-transform: uppercase;
     letter-spacing: 0.03em;
     color: var(--secondary);
-    margin-bottom: 6px;
+    margin-bottom: var(--space-6);
 }
 
 .dialer-recent-item {
@@ -1241,7 +1269,7 @@ textarea {
     text-align: left;
     background: none;
     border: none;
-    padding: 6px 4px;
+    padding: var(--space-6) var(--space-4);
     font-size: 13px;
     font-family: 'JetBrains Mono', monospace;
     color: var(--ink);
@@ -1256,8 +1284,8 @@ textarea {
 .dialer-keypad {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: var(--space-8);
+    margin-bottom: var(--space-14);
     justify-content: center;
 }
 
@@ -1287,8 +1315,8 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    margin-bottom: 4px;
+    gap: var(--space-10);
+    margin-bottom: var(--space-4);
 }
 
 .dialer-call-btn {
@@ -1313,8 +1341,8 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 14px;
-    margin-top: 14px;
+    gap: var(--space-14);
+    margin-top: var(--space-14);
 }
 
 .pagination-status {
@@ -1334,10 +1362,10 @@ textarea {
     background: var(--ink);
     color: white;
     border-radius: 20px;
-    padding: 10px 16px;
+    padding: var(--space-10) var(--space-16);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-8);
     font-size: 12px;
     font-weight: 700;
     font-family: inherit;
@@ -1352,7 +1380,7 @@ textarea {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 16px;
+    padding: var(--space-16);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
@@ -1360,7 +1388,7 @@ textarea {
     font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 700;
     font-size: 13px;
-    margin-bottom: 10px;
+    margin-bottom: var(--space-10);
 }
 
 .analytics-row {
@@ -1368,12 +1396,12 @@ textarea {
     justify-content: space-between;
     font-size: 12px;
     color: var(--secondary);
-    margin-bottom: 6px;
+    margin-bottom: var(--space-6);
 }
 
 .analytics-section-label {
-    margin-top: 16px;
-    margin-bottom: 6px;
+    margin-top: var(--space-16);
+    margin-bottom: var(--space-6);
     font-weight: 700;
 }
 
@@ -1417,15 +1445,15 @@ textarea {
     background: var(--page-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 12px 14px;
-    margin-bottom: 18px;
+    padding: var(--space-12) var(--space-14);
+    margin-bottom: var(--space-18);
 }
 
 .ticket-summary > div {
     display: flex;
     justify-content: space-between;
     font-size: 12px;
-    margin-bottom: 4px;
+    margin-bottom: var(--space-4);
 }
 
 .ticket-summary > div:last-child {
@@ -1439,7 +1467,7 @@ textarea {
 .ticket-priority {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-6);
     font-weight: 600;
 }
 
@@ -1489,9 +1517,9 @@ textarea {
 .forwarding-rule-row {
     display: grid;
     grid-template-columns: 1fr 20px 1.4fr auto;
-    gap: 10px;
+    gap: var(--space-10);
     align-items: center;
-    padding: 10px 0;
+    padding: var(--space-10) 0;
     border-top: 1px solid var(--border);
 }
 
@@ -1502,8 +1530,8 @@ textarea {
 .forwarding-add-row {
     display: grid;
     grid-template-columns: 1fr 1.4fr auto;
-    gap: 10px;
-    margin-top: 14px;
+    gap: var(--space-10);
+    margin-top: var(--space-14);
 }
 
 /* ── Call screen ──────────────────────────────────────────────────── */
@@ -1525,7 +1553,7 @@ textarea {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: var(--space-16);
     /* Unconditional, not just below the 880px width breakpoint — this is a
        height problem, not a width one. Any ordinary desktop window short
        enough that the call card plus a ticket drawer with even one logged
@@ -1548,7 +1576,7 @@ textarea {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 4px;
+    gap: var(--space-4);
     animation: call-screen-drop-in 0.25s ease-out;
     /* Flex children in a column container shrink to fit by default — with
        .call-screen-stack's own max-height now capping the outer container,
@@ -1564,7 +1592,7 @@ textarea {
     background: var(--surface);
     border-radius: 20px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
-    padding: 20px 24px;
+    padding: var(--space-20) var(--space-24);
     text-align: left;
     max-height: 55vh;
     overflow-y: auto;
@@ -1603,7 +1631,7 @@ textarea {
     position: relative;
     width: 88px;
     height: 88px;
-    margin-bottom: 12px;
+    margin-bottom: var(--space-12);
 }
 
 .call-screen-avatar {
@@ -1648,7 +1676,7 @@ textarea {
 .call-screen-status {
     font-size: 14px;
     color: var(--secondary);
-    margin-bottom: 14px;
+    margin-bottom: var(--space-14);
 }
 
 .call-screen-timer {
@@ -1660,7 +1688,7 @@ textarea {
     font-size: 12px;
     font-weight: 600;
     color: var(--brand-text);
-    margin-bottom: 10px;
+    margin-bottom: var(--space-10);
 }
 
 .call-screen-add-party-failed {
@@ -1669,14 +1697,14 @@ textarea {
 
 .call-screen-add-party-input {
     width: 100%;
-    margin-bottom: 14px;
+    margin-bottom: var(--space-14);
     text-align: center;
 }
 
 .call-screen-primary-actions {
     display: flex;
     gap: 32px;
-    margin-top: 8px;
+    margin-top: var(--space-8);
 }
 
 .call-screen-round-btn {
@@ -1703,8 +1731,8 @@ textarea {
 
 .call-screen-controls-grid {
     display: flex;
-    gap: 8px;
-    margin: 6px 0 16px;
+    gap: var(--space-8);
+    margin: var(--space-6) 0 16px;
     flex-wrap: wrap;
     justify-content: center;
 }
@@ -1713,12 +1741,12 @@ textarea {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-4);
     width: 68px;
     background: none;
     border: none;
     cursor: pointer;
-    padding: 8px 4px;
+    padding: var(--space-8) var(--space-4);
     border-radius: 12px;
     color: var(--ink);
     font-size: 11px;
@@ -1754,13 +1782,13 @@ textarea {
 .disposition-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin: 16px 0 20px;
+    gap: var(--space-6);
+    margin: var(--space-16) 0 20px;
 }
 
 .chip {
     cursor: pointer;
-    padding: 6px 12px;
+    padding: var(--space-6) var(--space-12);
     border-radius: 20px;
     font-size: 12px;
     font-weight: 600;
@@ -1781,7 +1809,7 @@ textarea {
 .hour-chart {
     display: flex;
     align-items: flex-end;
-    gap: 8px;
+    gap: var(--space-8);
     height: 140px;
 }
 
@@ -1791,7 +1819,7 @@ textarea {
     flex-direction: column;
     align-items: center;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--space-6);
     height: 100%;
 }
 
@@ -1856,12 +1884,12 @@ textarea {
     }
 
     .app-content {
-        padding: 16px;
+        padding: var(--space-16);
     }
 
     .cards {
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 10px;
+        gap: var(--space-10);
     }
 
     .agent-grid {
@@ -1900,11 +1928,11 @@ textarea {
     }
 
     .modal-overlay {
-        padding: 12px;
+        padding: var(--space-12);
     }
 
     .modal {
-        padding: 20px;
+        padding: var(--space-20);
     }
 
     /* Refines the base rule's max-height for the notch/home-indicator safe
@@ -1919,11 +1947,11 @@ textarea {
     }
 
     .call-screen {
-        padding: 22px 18px;
+        padding: var(--space-22) var(--space-18);
     }
 
     .ticket-drawer {
-        padding: 16px 18px;
+        padding: var(--space-16) var(--space-18);
     }
 
     /* Stacked in one right-aligned column instead of side-by-side, so

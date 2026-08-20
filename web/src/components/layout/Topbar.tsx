@@ -41,10 +41,12 @@ export default function Topbar({ onMenuClick, menuOpen }: { onMenuClick: () => v
     const { user } = useAuth();
     const { registrationState } = useSoftphone();
 
+    // GlobalPolling (mounted once in Layout) owns the actual refetch
+    // interval for this key — this just reads whatever's in the cache and
+    // re-renders when it refreshes.
     const { data } = useQuery({
         queryKey: ['agents-available-count'],
-        queryFn: () => apiFetch('/api/agents/available-count'),
-        refetchInterval: 15000
+        queryFn: () => apiFetch('/api/agents/available-count')
     });
 
     const title = TITLES[location.pathname] ?? 'Chumz Support';

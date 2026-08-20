@@ -8,6 +8,7 @@ import LiveAnalyticsBadge from '../widgets/LiveAnalyticsBadge';
 import { useKeyboardShortcuts } from '../../lib/useKeyboardShortcuts';
 import { useActiveCall } from '../../lib/activeCall';
 import { useSoftphone } from '../../lib/softphone';
+import GlobalPolling from '../../lib/globalPolling';
 
 export default function Layout({ children }: { children: ReactNode }) {
     useKeyboardShortcuts();
@@ -28,6 +29,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
     return (
         <div className={`app-shell ${onCall ? 'app-shell-on-call' : ''}`}>
+            <GlobalPolling />
             <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
             {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
             <CallScreen />
