@@ -172,6 +172,35 @@ async function reconcileStaleCallsOnStartup() {
     return data?.length ?? 0;
 }
 
+// Runs continuously, not just at startup — unlike reconcileStaleCallsOnStartup
+// (which can safely reconcile every non-terminal row unconditionally, since
+// this process's in-memory state is known to be empty at that exact moment),
+// this needs a real age cutoff: most non-terminal rows at any given instant
+// are just normal in-progress calls, not orphans. Two real gaps this closes:
+// 'dialing' (an outbound call whose agent-leg channel got orphaned by a
+// mid-call restart, discovered live — reconcileStaleCallsOnStartup didn't
+// even check this status), and rows written by Africa's Talking's legacy
+// /events webhook using its own ATVId_-prefixed session ids, which this
+// process's Asterisk-channel-based reconciliation can never recognize as
+// "this channel doesn't exist anymore" since it isn't a real Asterisk
+// channel id at all. A real still-in-progress call isn't harmed by this
+// running — teardown()'s own final upsert (matched by session_id) overwrites
+// whatever this wrote the moment the call actually ends for real.
+async function sweepStaleCalls(maxAgeMs) {
+    const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+    const { data, error } = await supabase
+        .from('call_logs')
+        .update({ status: 'failed' })
+        .in('status', ['ivr_started', 'input_received', 'queued', 'dialing', 'ongoing'])
+        .lt('created_at', cutoff)
+        .select('session_id');
+    if (error) {
+        console.error('❌ Stale-call sweep failed:', error.message);
+        return [];
+    }
+    return data ?? [];
+}
+
 // This process's in-memory bridge/pending-call state always starts empty, so
 // any agent still marked 'on_call' from before a restart cannot actually be
 // on a call this process knows about or can ever clean up — left alone
@@ -253,5 +282,6 @@ module.exports = {
     markMissedIfAbandoned,
     reconcileStaleCallsOnStartup,
     reconcileStaleAgentsOnStartup,
-    reconcileGhostAgents
+    reconcileGhostAgents,
+    sweepStaleCalls
 };

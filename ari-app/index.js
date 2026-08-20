@@ -35,7 +35,8 @@ const {
     markMissedIfAbandoned,
     reconcileStaleCallsOnStartup,
     reconcileStaleAgentsOnStartup,
-    reconcileGhostAgents
+    reconcileGhostAgents,
+    sweepStaleCalls
 } = require('./supabase');
 
 const ARI_URL = process.env.ARI_URL || 'http://127.0.0.1:8088';
@@ -51,6 +52,16 @@ const QUEUE_POLL_MS = 3000;
 // that ever ends the call for them.
 const MAX_QUEUE_WAIT_MS = 5 * 60 * 1000;
 const ADD_PARTY_POLL_MS = 3000;
+// Catches call_logs rows stuck in a non-terminal status with nothing left to
+// ever resolve them — an orphaned outbound-agent leg from a mid-call
+// restart, or a row from Africa's Talking's legacy /events webhook (its own
+// ATVId_-prefixed session ids aren't real Asterisk channel ids, so this
+// process's channel-based reconciliation can never recognize one as
+// abandoned). 20 minutes is short enough to clear orphans quickly; a real
+// call still running past that isn't harmed — its own eventual completion
+// write overwrites this by session_id regardless.
+const STALE_CALL_MAX_AGE_MS = 20 * 60 * 1000;
+const STALE_CALL_SWEEP_MS = 5 * 60 * 1000;
 const ARI_HEARTBEAT_MS = 15000;
 const ARI_HEARTBEAT_TIMEOUT_MS = 5000;
 const GHOST_AGENT_POLL_MS = 30000;
@@ -1154,6 +1165,15 @@ async function main() {
     setInterval(() => tryDequeueNext().catch(err => console.error('❌ Queue poll error:', err.message)), QUEUE_POLL_MS);
     setInterval(() => timeoutStaleQueueEntries().catch(err => console.error('❌ Queue timeout sweep error:', err.message)), QUEUE_POLL_MS);
     setInterval(() => tryAddPartyPoll().catch(err => console.error('❌ Add-party poll error:', err.message)), ADD_PARTY_POLL_MS);
+    setInterval(
+        () =>
+            sweepStaleCalls(STALE_CALL_MAX_AGE_MS)
+                .then(swept => {
+                    if (swept.length > 0) console.log(`🧹 Swept ${swept.length} stale call_logs row(s) (non-terminal for 20+ min)`);
+                })
+                .catch(err => console.error('❌ Stale-call sweep poll error:', err.message)),
+        STALE_CALL_SWEEP_MS
+    );
 
     // The 'error' handler above only fires if ari-client's websocket
     // surfaces a fatal error — it does nothing for a connection that goes
