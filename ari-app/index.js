@@ -990,6 +990,14 @@ async function main() {
     client.on('StasisStart', async (event, channel) => {
         const args = event.args || [];
 
+        // Health-probe channels from checkAriEventDelivery below — never a
+        // real customer, so no call_logs write and no IVR. Just prove the
+        // event actually arrived and get out of the way.
+        if (args[0] === 'health-probe') {
+            channel.hangup().catch(() => {});
+            return;
+        }
+
         if (args[0] && args[0].startsWith('agent-leg:')) {
             const [, agentId, customerSessionId] = args[0].split(':');
             bridgeAgentLeg(channel, agentId, customerSessionId).catch(err =>
@@ -1123,17 +1131,72 @@ async function main() {
     // surfaces a fatal error — it does nothing for a connection that goes
     // quiet without erroring (observed in practice as the root cause of the
     // week-long inbound outage this process exists to prevent a repeat of).
-    // A cheap REST round-trip is the only way to actually confirm Asterisk
-    // is still there and answering, not just that the socket hasn't thrown.
+    //
+    // A plain REST round-trip (the original version of this check) only
+    // proves the HTTP side of the ARI connection still answers — it does
+    // NOT prove the separate event-delivery websocket is still delivering
+    // StasisStart/StasisEnd. Those are genuinely independent under the
+    // hood, and a live load test caught exactly that split: this process
+    // stopped receiving StasisStart entirely (real inbound calls would have
+    // silently failed) while client.channels.list() kept succeeding and
+    // this heartbeat kept reporting healthy the whole time. Originating a
+    // real probe channel into this same Stasis app and requiring an actual
+    // StasisStart callback for it is the only check that would have caught
+    // that failure — a REST call alone cannot.
+    function checkAriEventDelivery() {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            // Pre-assigned, not read from originate()'s response — the same
+            // race documented elsewhere in this file (agentLegBySessionId,
+            // ringGroupBySessionId): the StasisStart event can arrive over
+            // the websocket before the HTTP originate() response is even
+            // parsed, so a listener keyed off the response's channel id can
+            // miss the one event it's waiting for and wait out the full
+            // timeout every single time.
+            const probeChannelId = `health-probe-${crypto.randomUUID()}`;
+
+            const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                client.removeListener('StasisStart', onStart);
+                reject(new Error('no StasisStart received for health-probe channel'));
+            }, ARI_HEARTBEAT_TIMEOUT_MS);
+
+            function onStart(event, channel) {
+                if (settled || channel.id !== probeChannelId) return;
+                settled = true;
+                clearTimeout(timer);
+                client.removeListener('StasisStart', onStart);
+                resolve();
+            }
+            client.on('StasisStart', onStart);
+
+            client.channels
+                .originate({
+                    channelId: probeChannelId,
+                    endpoint: 'Local/probe@ari-heartbeat-sink/n',
+                    app: APP_NAME,
+                    appArgs: 'health-probe',
+                    timeout: 5
+                })
+                .catch(err => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    client.removeListener('StasisStart', onStart);
+                    reject(err);
+                });
+        });
+    }
+
     setInterval(() => {
-        const timedOut = new Promise((_, reject) => setTimeout(() => reject(new Error('heartbeat timed out')), ARI_HEARTBEAT_TIMEOUT_MS));
-        Promise.race([client.channels.list(), timedOut])
+        checkAriEventDelivery()
             .then(() => {
                 ariHealthy = true;
             })
             .catch(err => {
                 ariHealthy = false;
-                console.error('❌ ARI heartbeat failed — connection to Asterisk looks dead:', err.message);
+                console.error('❌ ARI heartbeat failed — event delivery looks dead:', err.message);
                 process.exit(1);
             });
     }, ARI_HEARTBEAT_MS);
