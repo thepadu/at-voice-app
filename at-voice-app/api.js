@@ -21,6 +21,14 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         return !!row.agent_number && !row.option_pressed && row.direction !== 'Outbound';
     }
 
+    // Ticket write endpoints validate enum fields (priority/status) but let
+    // every free-text field through unchecked — this at least guards the
+    // shape (a string, within a sane length) without requiring a schema
+    // library for one endpoint.
+    function isValidTicketText(value, maxLen) {
+        return typeof value === 'string' && value.length <= maxLen;
+    }
+
     // Cheap enough at this project's scale to just fetch and map by phone
     // per-request (same pattern GET /api/agents/stats already uses) rather
     // than a SQL join — the agents table is tiny.
@@ -995,6 +1003,25 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             return res.status(400).json({ error: 'Invalid status' });
         }
 
+        if (session_id !== undefined && session_id !== null && !isValidTicketText(session_id, 128)) {
+            return res.status(400).json({ error: 'Invalid session_id' });
+        }
+        if (caller_name !== undefined && caller_name !== null && !isValidTicketText(caller_name, 120)) {
+            return res.status(400).json({ error: 'Invalid caller_name' });
+        }
+        if (caller_number !== undefined && caller_number !== null && !isValidTicketText(caller_number, 32)) {
+            return res.status(400).json({ error: 'Invalid caller_number' });
+        }
+        if (tag !== undefined && tag !== null && !isValidTicketText(tag, 60)) {
+            return res.status(400).json({ error: 'Invalid tag' });
+        }
+        if (notes !== undefined && notes !== null && !isValidTicketText(notes, 2000)) {
+            return res.status(400).json({ error: 'Invalid notes' });
+        }
+        if (assigned_agent_id !== undefined && assigned_agent_id !== null && !isValidTicketText(assigned_agent_id, 64)) {
+            return res.status(400).json({ error: 'Invalid assigned_agent_id' });
+        }
+
         const { data, error } = await supabase
             .from('tickets')
             .insert({
@@ -1028,6 +1055,16 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
 
         if (priority !== undefined && !['Low', 'Medium', 'High', 'Urgent'].includes(priority)) {
             return res.status(400).json({ error: 'Invalid priority' });
+        }
+
+        if (tag !== undefined && tag !== null && !isValidTicketText(tag, 60)) {
+            return res.status(400).json({ error: 'Invalid tag' });
+        }
+        if (notes !== undefined && notes !== null && !isValidTicketText(notes, 2000)) {
+            return res.status(400).json({ error: 'Invalid notes' });
+        }
+        if (assigned_agent_id !== undefined && assigned_agent_id !== null && !isValidTicketText(assigned_agent_id, 64)) {
+            return res.status(400).json({ error: 'Invalid assigned_agent_id' });
         }
 
         const updates = {};

@@ -86,6 +86,40 @@ function getAudioSender(session: Session) {
     return pc?.getSenders().find(s => s.track?.kind === 'audio') ?? null;
 }
 
+// The reconnect logic on the UserAgent's transport (see onDisconnect below)
+// only recovers the ability to register/receive new calls — it does nothing
+// for a call already in progress when an agent's network changes (wifi to
+// mobile, a NAT rebind). That leaves the SIP signaling connection perfectly
+// fine while the actual audio path is dead, with nothing to notice or fix
+// it short of the call just going silent. A re-INVITE with iceRestart tells
+// the browser to renegotiate a fresh ICE candidate pair on the existing
+// dialog — the same call continues, just with a new media path.
+function watchIceConnection(session: Session) {
+    const pc = (session.sessionDescriptionHandler as unknown as { peerConnection: RTCPeerConnection })
+        ?.peerConnection;
+    if (!pc) return;
+    let restarting = false;
+    pc.addEventListener('iceconnectionstatechange', () => {
+        if (pc.iceConnectionState !== 'failed' || restarting || session.state !== SessionState.Established) return;
+        restarting = true;
+        console.warn('[softphone] ICE connection failed mid-call — attempting ICE restart');
+        // offerOptions is a web-platform-specific SessionDescriptionHandlerOptions
+        // field that Session.invite()'s core type (shared across non-browser
+        // platforms) doesn't declare, even though it's exactly what the web
+        // SDH this app actually uses reads at runtime to trigger a real
+        // RTCPeerConnection ICE restart.
+        const restartOptions = {
+            sessionDescriptionHandlerOptions: { offerOptions: { iceRestart: true } }
+        } as unknown as Parameters<typeof session.invite>[0];
+        session
+            .invite(restartOptions)
+            .catch(err => console.error('[softphone] ICE restart failed — call may drop:', err))
+            .finally(() => {
+                restarting = false;
+            });
+    });
+}
+
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const { user } = useAuth();
     const showToast = useToast();
@@ -137,6 +171,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
     const handleSessionEstablished = useCallback((session: Session, remoteNumber: string) => {
         if (remoteAudioRef.current) attachRemoteAudio(session, remoteAudioRef.current);
+        watchIceConnection(session);
         setActiveCall({ session, remoteNumber, muted: false, held: false, startedAt: Date.now() });
     }, []);
 
