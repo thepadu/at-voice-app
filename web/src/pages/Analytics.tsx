@@ -41,35 +41,43 @@ export default function Analytics() {
     const today = useMemo(todayISO, []);
     const [statsPage, setStatsPage] = useState(1);
 
-    const { data: callsData } = useQuery({
+    const { data: callsData, isLoading: callsLoading } = useQuery({
         queryKey: ['analytics-calls', today],
         queryFn: () => apiFetch(`/api/calls?from=${today}&to=${today}`),
         refetchInterval: 30000
     });
 
-    const { data: hourData } = useQuery({
+    const { data: hourData, isLoading: hourLoading } = useQuery({
         queryKey: ['calls-by-hour'],
         queryFn: () => apiFetch('/api/calls/by-hour'),
         refetchInterval: 60000
     });
 
-    const { data: statsData } = useQuery({
+    const { data: statsData, isLoading: statsLoading } = useQuery({
         queryKey: ['agents-stats-full'],
         queryFn: () => apiFetch('/api/agents/stats'),
         refetchInterval: 30000
     });
 
-    const { data: statusSummaryData } = useQuery({
+    const { data: statusSummaryData, isLoading: statusLoading } = useQuery({
         queryKey: ['agents-status-summary'],
         queryFn: () => apiFetch('/api/agents/status-summary'),
         refetchInterval: 15000
     });
 
-    const { data: ticketStatsData } = useQuery({
+    const { data: ticketStatsData, isLoading: ticketsLoading } = useQuery({
         queryKey: ['tickets-stats'],
         queryFn: () => apiFetch('/api/tickets/stats'),
         refetchInterval: 30000
     });
+
+    // First paint with none of the five queries resolved yet looked
+    // identical to "this dashboard genuinely has no data" — every card a
+    // dash, every panel showing its own empty state. Gating on the initial
+    // load specifically (not every refetch — the 15-30s auto-refreshes
+    // shouldn't blank the page every time) fixes the first impression
+    // without touching each card's individual '—' fallback.
+    const initialLoading = callsLoading && hourLoading && statsLoading && statusLoading && ticketsLoading;
 
     const summary: Summary | undefined = callsData?.summary;
     const agentStats: AgentStat[] = useMemo(() => statsData?.agents ?? [], [statsData]);
@@ -86,6 +94,14 @@ export default function Analytics() {
         if (!withCalls.length) return 0;
         return Math.round(withCalls.reduce((sum, a) => sum + a.avgHandleTime, 0) / withCalls.length);
     }, [agentStats]);
+
+    if (initialLoading) {
+        return (
+            <div>
+                <p className="empty">Loading analytics…</p>
+            </div>
+        );
+    }
 
     return (
         <div>

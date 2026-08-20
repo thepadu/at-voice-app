@@ -160,7 +160,10 @@ function CallRatingPanel() {
     const toggle = useMutation({
         mutationFn: (rating_enabled: boolean) =>
             apiFetch('/api/ivr-config', { method: 'PATCH', body: JSON.stringify({ rating_enabled }) }),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ivr-config'] }),
+        onSuccess: (_data, rating_enabled) => {
+            showToast(rating_enabled ? 'Call rating turned on' : 'Call rating turned off');
+            queryClient.invalidateQueries({ queryKey: ['ivr-config'] });
+        },
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
     });
 
@@ -200,7 +203,10 @@ export default function CallForwarding() {
 
     const toggleEnabled = useMutation({
         mutationFn: (enabled: boolean) => apiFetch('/api/forwarding-config', { method: 'PATCH', body: JSON.stringify({ enabled }) }),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['forwarding-config'] }),
+        onSuccess: (_data, enabled) => {
+            showToast(enabled ? 'Call forwarding turned on' : 'Call forwarding turned off');
+            queryClient.invalidateQueries({ queryKey: ['forwarding-config'] });
+        },
         onError: (err: unknown) => showToast(errorMessage(err), 'error')
     });
 
@@ -211,6 +217,7 @@ export default function CallForwarding() {
                 body: JSON.stringify({ condition: newCondition, destination: newDestination })
             }),
         onSuccess: () => {
+            showToast('Forwarding rule added');
             setNewDestination('');
             queryClient.invalidateQueries({ queryKey: ['forwarding-rules'] });
         },
@@ -220,6 +227,7 @@ export default function CallForwarding() {
     const deleteRule = useMutation({
         mutationFn: (id: number) => apiFetch(`/api/forwarding-rules/${id}`, { method: 'DELETE' }),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['forwarding-rules'] }),
+        onError: (err: unknown) => showToast(errorMessage(err), 'error'),
         onSettled: () => setPendingDelete(null)
     });
 

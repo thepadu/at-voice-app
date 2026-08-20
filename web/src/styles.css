@@ -3,13 +3,31 @@
 :root {
     --ink: #2C3E50;
     --secondary: #757575;
-    --muted: #9E9E9E;
+    /* #9E9E9E measured at 2.68:1 on white — well below WCAG AA's 4.5:1 for
+       normal text, and this token is the color of nearly every .hint
+       caption in the app. #6B7280 keeps the same "quiet secondary text"
+       role (it's Tailwind's own gray-500, a deliberately chosen neutral,
+       not an arbitrary pick) at 4.83:1. */
+    --muted: #6B7280;
     --border: #E0E0E0;
     --page-bg: #F9F9F9;
     --surface: #ffffff;
     --sidebar-bg: #2C3E50;
     --topbar-bg: #ffffff;
     --brand: #17A697;
+    /* --brand itself measured 3.03:1 as text sitting on --surface (links,
+       active nav/tabs) — well short of WCAG AA's 4.5:1. Same hue, dark
+       enough to actually read at 5.21:1 on a light surface; overridden
+       per-theme below since a color that's "darker" against a light
+       surface needs to go the other way against a dark one. --brand
+       itself is untouched — this only replaces text/foreground call sites. */
+    --brand-text: #0E7A6E;
+    /* .btn-primary's white-on-brand text also measured 3.03:1. Unlike
+       --brand-text above, this is a fixed pair (white text sitting
+       directly on the button's own background) with no page-surface
+       involved, so it doesn't need a per-theme override — 5.21:1 with
+       white holds in either theme. */
+    --brand-btn: #0E7A6E;
     --brand-dark: #2C3E50;
     --brand-bright: #4DB8AA;
     --brand-rgb: 23, 166, 151;
@@ -30,6 +48,11 @@
        --secondary switched to light-on-dark colors — text was unreadably
        faint against those still-white surfaces. */
     --surface: #22303D;
+    /* --brand-text needs to go lighter, not darker, against a dark
+       surface — #0E7A6E (chosen for 5.21:1 on white) drops to 2.58:1 here.
+       --brand-bright already exists for this exact "brighter teal for a
+       dark background" role and measures 5.62:1 on the dark --surface. */
+    --brand-text: var(--brand-bright);
 }
 
 * {
@@ -278,7 +301,7 @@ h1, h2, h3, h4 {
     align-items: center;
     gap: 6px;
     background: var(--tint);
-    color: var(--brand);
+    color: var(--brand-text);
     padding: 6px 12px;
     border-radius: 20px;
     font-size: 12px;
@@ -476,7 +499,7 @@ tr:not(:last-child) td {
 }
 
 .direction-icon-incoming {
-    color: var(--brand);
+    color: var(--brand-text);
 }
 
 .direction-icon-outgoing {
@@ -597,7 +620,7 @@ tr:not(:last-child) td {
 }
 
 .btn-primary {
-    background: var(--brand);
+    background: var(--brand-btn);
     color: white;
 }
 
@@ -617,13 +640,13 @@ tr:not(:last-child) td {
    disabled) — still clickable, for calling back again if needed. */
 .btn-callback-done {
     background: var(--tint);
-    color: var(--brand);
+    color: var(--brand-text);
 }
 
 .btn-link {
     background: none;
     padding: 4px 8px;
-    color: var(--brand);
+    color: var(--brand-text);
     text-decoration: none;
 }
 
@@ -641,7 +664,7 @@ tr:not(:last-child) td {
 .btn-icon:hover {
     background: var(--tint);
     border-color: var(--brand);
-    color: var(--brand);
+    color: var(--brand-text);
 }
 
 .btn-link-danger {
@@ -1009,7 +1032,7 @@ textarea {
     height: 40px;
     border-radius: 50%;
     background: var(--tint);
-    color: var(--brand);
+    color: var(--brand-text);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1077,6 +1100,15 @@ textarea {
     border-radius: 20px;
     padding: 18px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    /* Grows upward from a fixed bottom anchor with no cap otherwise — on
+       any window shorter than roughly 660px (a non-maximized browser, a
+       laptop with a crowded bookmarks bar, landscape on a phone) the
+       header and the number-being-typed display pushed above the top of
+       the viewport and disappeared, while the keypad below kept visibly
+       responding to taps with no way to see what had actually been
+       entered. Confirmed live at 1200x600. */
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
 }
 
 /* A brief scale+fade rather than an instant show — the dialer holds more
@@ -1115,7 +1147,7 @@ textarea {
 .dialer-country-code {
     flex-shrink: 0;
     background: var(--tint);
-    color: var(--brand);
+    color: var(--brand-text);
     border: none;
     border-radius: 8px;
     padding: 0 10px;
@@ -1219,7 +1251,7 @@ textarea {
 
 .dialer-key:hover {
     background: var(--tint);
-    color: var(--brand);
+    color: var(--brand-text);
 }
 
 .dialer-popover-actions {
@@ -1465,6 +1497,16 @@ textarea {
     flex-direction: column;
     align-items: center;
     gap: 16px;
+    /* Unconditional, not just below the 880px width breakpoint — this is a
+       height problem, not a width one. Any ordinary desktop window short
+       enough that the call card plus a ticket drawer with even one logged
+       ticket exceeds the viewport pushed the drawer's own form fields and
+       its Close/Create ticket buttons below the fold with no way to reach
+       them (position: fixed isn't part of the page's own scrollable flow,
+       so there was no scrollbar to find either). Confirmed live down to
+       1366x768 — an entirely ordinary laptop screen, not an edge case. */
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
 }
 
 .call-screen {
@@ -1479,6 +1521,13 @@ textarea {
     text-align: center;
     gap: 4px;
     animation: call-screen-drop-in 0.25s ease-out;
+    /* Flex children in a column container shrink to fit by default — with
+       .call-screen-stack's own max-height now capping the outer container,
+       that default let the browser silently compress this card and squeeze
+       the ticket drawer below it, instead of letting the *stack* overflow
+       and scroll. flex-shrink: 0 keeps this card at its natural size so
+       the stack's own scrolling actually does something. */
+    flex-shrink: 0;
 }
 
 .ticket-drawer {
@@ -1491,6 +1540,7 @@ textarea {
     max-height: 55vh;
     overflow-y: auto;
     animation: call-screen-drop-in 0.2s ease-out;
+    flex-shrink: 0;
 }
 
 .ticket-drawer-header {
@@ -1580,7 +1630,7 @@ textarea {
 .call-screen-add-party-status {
     font-size: 12px;
     font-weight: 600;
-    color: var(--brand);
+    color: var(--brand-text);
     margin-bottom: 10px;
 }
 
@@ -1656,7 +1706,7 @@ textarea {
 }
 
 .call-screen-control-active {
-    color: var(--brand);
+    color: var(--brand-text);
 }
 
 /* The rest of the shell visually steps back the instant any call state
@@ -1832,13 +1882,10 @@ textarea {
         padding: 20px;
     }
 
-    /* .call-screen (avatar, number, timer, controls) already eats most of a
-       phone's viewport on its own — stacking the ticket drawer below it in
-       this same fixed, flex-column container with no height limit pushed
-       the drawer partly or fully below the visible screen, with no way to
-       scroll to it (a `position: fixed` element isn't part of the page's
-       own scrollable flow). Capping the stack's own height and letting it
-       scroll as a unit fixes that without changing anything on desktop. */
+    /* Refines the base rule's max-height for the notch/home-indicator safe
+       areas and the narrower top offset this breakpoint already uses —
+       the height cap and scroll behavior itself now come from the base
+       .call-screen-stack rule above, not just here. */
     .call-screen-stack {
         top: calc(72px + env(safe-area-inset-top));
         width: calc(100vw - 24px);

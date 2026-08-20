@@ -123,7 +123,7 @@ export default function Calls() {
     if (filters.to) params.set('to', filters.to);
     if (filters.caller) params.set('caller', filters.caller);
 
-    const { data } = useQuery({
+    const { data, isLoading } = useQuery({
         queryKey: ['calls', tab, page, filters],
         queryFn: () => apiFetch(`/api/calls?${params.toString()}`)
     });
@@ -194,7 +194,10 @@ export default function Calls() {
                         </tr>
                     </thead>
                     <tbody>
-                        {calls.length === 0 && (
+                        {isLoading && (
+                            <tr><td colSpan={6} className="empty">Loading…</td></tr>
+                        )}
+                        {!isLoading && calls.length === 0 && (
                             <tr><td colSpan={6} className="empty">{emptyMessage}</td></tr>
                         )}
                         {calls.map(call => (
@@ -228,7 +231,8 @@ export default function Calls() {
                 </table>
 
                 <div className="calls-mobile-list">
-                    {calls.length === 0 && <p className="empty">{emptyMessage}</p>}
+                    {isLoading && <p className="empty">Loading…</p>}
+                    {!isLoading && calls.length === 0 && <p className="empty">{emptyMessage}</p>}
                     {calls.map(call => (
                         <CallCard key={call.session_id} call={call} onOpenDetails={() => setDetailsCall(call)} onCallBack={callBack} />
                     ))}
