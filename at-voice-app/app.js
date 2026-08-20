@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -45,6 +46,17 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
+// A dashboard user's browser never gets close to these limits — GlobalPolling's
+// busiest interval is 12 requests/minute, so 200/min per IP is only ever a
+// backstop against scraping/brute-force, not something a real shift trips.
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false });
+// AT's own retry behavior during an upstream incident must never be the
+// thing that makes an already-bad outage worse by dropping real call
+// events — this only guards against a genuine flood, not normal traffic.
+const webhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
+
+app.use('/auth', apiLimiter);
+
 const { requireAuth, requireSupervisor } = authRoutes(app, supabase);
 
 // /events doesn't run through requireAuth — it's Africa's Talking's own
@@ -66,6 +78,7 @@ function verifyAtWebhookSecret(req, res, next) {
 }
 
 // Routes
+app.use('/api', apiLimiter);
 apiRoutes(app, supabase, requireAuth, requireSupervisor);
 
 // Health check for DO App Platform's readiness/liveness probes — kept
@@ -99,14 +112,14 @@ app.get('/dashboard', (req, res) => {
 // first, for the exact same "nothing should reach this URL" reasoning,
 // and both actively killed real calls the two previous times this
 // number's AT-side config silently drifted back to the HTTPS callback.
-app.post('/voice', verifyAtWebhookSecret, (req, res) => {
+app.post('/voice', webhookLimiter, verifyAtWebhookSecret, (req, res) => {
     res.set('Content-Type', 'application/xml');
     res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 });
 
 
 // 🔹 EVENTS CALLBACK (UPSERT)
-app.post('/events', verifyAtWebhookSecret, async (req, res) => {
+app.post('/events', webhookLimiter, verifyAtWebhookSecret, async (req, res) => {
     console.log('📡 EVENT:', req.body);
 
     const {

@@ -16,6 +16,7 @@ process.on('uncaughtException', err => {
 });
 
 const crypto = require('crypto');
+const http = require('http');
 const ari = require('ari-client');
 const { normalizePhone } = require('./lib/phone');
 const { synthesize, invalidate } = require('./tts');
@@ -50,6 +51,8 @@ const QUEUE_POLL_MS = 3000;
 // that ever ends the call for them.
 const MAX_QUEUE_WAIT_MS = 5 * 60 * 1000;
 const ADD_PARTY_POLL_MS = 3000;
+const ARI_HEARTBEAT_MS = 15000;
+const ARI_HEARTBEAT_TIMEOUT_MS = 5000;
 const GHOST_AGENT_POLL_MS = 30000;
 // A single ghost reconciliation is a normal, expected event (a tab closed
 // without a clean disconnect, a laptop put to sleep) — but the same agent
@@ -85,6 +88,25 @@ const partyChannelsBySessionId = new Map(); // customer sessionId -> Set of extr
 let client;
 let holdingBridge;
 let holdingBridgeCreation; // in-flight bridges.create() promise — see getHoldingBridge
+
+// Starts immediately (not inside main()) so it can answer while the process
+// is still connecting, or after ari.connect() has failed — distinguishing
+// "process down" (connection refused) from "process up but not routing
+// calls" (200 with ariHealthy: false) is the whole point. Previously this
+// process had no HTTP surface at all, so an external monitor could only
+// check the unrelated dashboard app and never learn anything about whether
+// calls could actually be handled.
+let ariHealthy = false;
+const HEALTH_PORT = process.env.ARI_HEALTH_PORT || 3001;
+http.createServer((req, res) => {
+    if (req.url === '/healthz') {
+        res.writeHead(ariHealthy ? 200 : 503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ariConnected: ariHealthy }));
+        return;
+    }
+    res.writeHead(404);
+    res.end();
+}).listen(HEALTH_PORT, () => console.log(`🩺 Health check listening on :${HEALTH_PORT}/healthz`));
 
 // Kenya has a single timezone with no DST (EAT, UTC+3) — not worth a tz
 // library dependency for that. active_days is 0=Sunday..6=Saturday.
@@ -963,6 +985,7 @@ async function completeAddParty(destChannel, customerSessionId) {
 
 async function main() {
     client = await ari.connect(ARI_URL, ARI_USERNAME, ARI_PASSWORD);
+    ariHealthy = true;
 
     client.on('StasisStart', async (event, channel) => {
         const args = event.args || [];
@@ -1057,7 +1080,18 @@ async function main() {
         );
     });
 
-    client.on('error', err => console.error('❌ ARI client error:', err.message));
+    // ari-client has no built-in reconnect — an 'error' here means the
+    // websocket to Asterisk is gone, and every in-memory map above (queue,
+    // bridges, ring groups) is now stale relative to whatever Asterisk
+    // thinks is happening. Rebuilding that state in place is far riskier
+    // than a clean restart: exit and let systemd (Restart=always,
+    // RestartSec=3) bring up a fresh connection with fresh state, the same
+    // philosophy already used for uncaughtException above.
+    client.on('error', err => {
+        ariHealthy = false;
+        console.error('❌ ARI client error — exiting for a clean restart:', err.message);
+        process.exit(1);
+    });
 
     // Reconciled BEFORE client.start()/the poll intervals below register —
     // otherwise a call could theoretically enter Stasis in the brief window
@@ -1084,6 +1118,25 @@ async function main() {
     setInterval(() => tryDequeueNext().catch(err => console.error('❌ Queue poll error:', err.message)), QUEUE_POLL_MS);
     setInterval(() => timeoutStaleQueueEntries().catch(err => console.error('❌ Queue timeout sweep error:', err.message)), QUEUE_POLL_MS);
     setInterval(() => tryAddPartyPoll().catch(err => console.error('❌ Add-party poll error:', err.message)), ADD_PARTY_POLL_MS);
+
+    // The 'error' handler above only fires if ari-client's websocket
+    // surfaces a fatal error — it does nothing for a connection that goes
+    // quiet without erroring (observed in practice as the root cause of the
+    // week-long inbound outage this process exists to prevent a repeat of).
+    // A cheap REST round-trip is the only way to actually confirm Asterisk
+    // is still there and answering, not just that the socket hasn't thrown.
+    setInterval(() => {
+        const timedOut = new Promise((_, reject) => setTimeout(() => reject(new Error('heartbeat timed out')), ARI_HEARTBEAT_TIMEOUT_MS));
+        Promise.race([client.channels.list(), timedOut])
+            .then(() => {
+                ariHealthy = true;
+            })
+            .catch(err => {
+                ariHealthy = false;
+                console.error('❌ ARI heartbeat failed — connection to Asterisk looks dead:', err.message);
+                process.exit(1);
+            });
+    }, ARI_HEARTBEAT_MS);
 
     // "Ghost agents" — status says available/ringing but the browser
     // heartbeat behind it has gone stale (or never existed at all, e.g. a
