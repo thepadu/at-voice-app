@@ -139,12 +139,12 @@ export default function Analytics() {
                     <p>{summary?.missed ?? '—'}</p>
                 </div>
                 <div className="card">
-                    <div className="card-label">Avg Handle Time (all-time)</div>
+                    <div className="card-label">Team Avg Handle Time (all-time)</div>
                     <p>{avgHandleTimeAll}s</p>
                 </div>
             </div>
 
-            <CallsByHourChart hours={hourData?.hours ?? []} />
+            <CallsByHourChart hours={hourData?.hours ?? []} isLoading={hourLoading} />
 
             <div className="panel">
                 <h3>Missed calls, by reason</h3>

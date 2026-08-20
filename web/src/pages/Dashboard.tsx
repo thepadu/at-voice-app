@@ -59,7 +59,7 @@ export default function Dashboard() {
         refetchInterval: 30000
     });
 
-    const { data: hourData } = useQuery({
+    const { data: hourData, isLoading: hourLoading } = useQuery({
         queryKey: ['calls-by-hour'],
         queryFn: () => apiFetch('/api/calls/by-hour'),
         refetchInterval: 60000
@@ -106,7 +106,7 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            <CallsByHourChart hours={hourData?.hours ?? []} />
+            <CallsByHourChart hours={hourData?.hours ?? []} isLoading={hourLoading} />
 
             <div className="panel">
                 <div className="panel-header">
@@ -181,7 +181,7 @@ export default function Dashboard() {
                                 <strong>{myStats.missed}</strong>
                             </div>
                             <div className="analytics-row">
-                                <span>Avg handle time</span>
+                                <span>My avg handle time</span>
                                 <strong>{myStats.avgHandleTime}s</strong>
                             </div>
                         </div>
