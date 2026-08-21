@@ -169,15 +169,25 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
         // outbound) instead of just the calls an agent actually answered, so
         // every tab here also excludes/requires isMissed to keep the three
         // tabs a true, non-overlapping partition of "All".
-        if (tab === 'incoming') calls = calls.filter(row => classifyDirection(row) === 'incoming' && !isMissed(row));
-        if (tab === 'outgoing') calls = calls.filter(row => classifyDirection(row) === 'outgoing');
+        // NOTE: calls[].direction was already set to classifyDirection(row)'s
+        // *result* ('incoming'/'outgoing') by the .map() above — checking it
+        // directly here rather than calling classifyDirection() again.
+        // classifyDirection() itself checks row.direction === 'Outbound', so
+        // re-calling it on these already-transformed rows compared that
+        // literal string against 'incoming'/'outgoing' and always fell
+        // through to 'incoming' — the outgoing tab was empty, summary.outbound
+        // was always 0, and every tab downstream of it inherited the same
+        // wrong classification. classifyDirection() is still correct to call
+        // on `data` (the raw, untransformed rows) elsewhere below.
+        if (tab === 'incoming') calls = calls.filter(row => row.direction === 'incoming' && !isMissed(row));
+        if (tab === 'outgoing') calls = calls.filter(row => row.direction === 'outgoing');
 
         if (tab === 'missed') {
             // Also requires 'incoming' so a failed *outbound* dial (which
             // gets status 'failed' too, see finishOutboundCall in the ARI
             // app) shows up only in Outgoing, not double-counted here as a
             // missed inbound call.
-            calls = calls.filter(row => isMissed(row) && classifyDirection(row) === 'incoming');
+            calls = calls.filter(row => isMissed(row) && row.direction === 'incoming');
 
             // Tells the agent at a glance whether this caller has already
             // been called back — derived from the data itself (any later
@@ -202,13 +212,13 @@ module.exports = function (app, supabase, requireAuth, requireSupervisor) {
             login: calls.filter(c => c.option_pressed === '1').length,
             deposit: calls.filter(c => c.option_pressed === '2').length,
             agentRequests: calls.filter(c => c.option_pressed === '3').length,
-            outbound: calls.filter(c => classifyDirection(c) === 'outgoing').length,
+            outbound: calls.filter(c => c.direction === 'outgoing').length,
             // Inbound-only, same reasoning as the missed-tab filter above —
             // a failed outbound dial shouldn't inflate this into counting
             // calls Chumz placed as calls Chumz "missed".
-            missed: calls.filter(c => isMissed(c) && classifyDirection(c) === 'incoming').length,
+            missed: calls.filter(c => isMissed(c) && c.direction === 'incoming').length,
             missedByReason: {
-                abandoned: calls.filter(c => c.status === 'failed' && classifyDirection(c) === 'incoming').length,
+                abandoned: calls.filter(c => c.status === 'failed' && c.direction === 'incoming').length,
                 forwarded: calls.filter(c => c.status === 'forwarded').length,
                 afterHours: calls.filter(c => c.status === 'after_hours').length
             }
