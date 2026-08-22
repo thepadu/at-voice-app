@@ -39,6 +39,25 @@ const {
     sweepStaleCalls
 } = require('./supabase');
 
+// ari-client's error objects don't reliably carry a string .message — for at
+// least some ARI REST error responses (e.g. a 404 against a channel that
+// hung up a moment earlier), .message is itself Asterisk's parsed JSON error
+// body ({"message": "Channel not found"}), not a string. console.error(...,
+// err.message) on one of those prints a confusing multi-line object dump
+// instead of a readable line, discovered live when a real customer's hangup
+// race hit exactly this. Used wherever an ARI-originated error gets logged.
+function errText(err) {
+    if (typeof err?.message === 'string') return err.message;
+    if (err?.message) {
+        try {
+            return JSON.stringify(err.message);
+        } catch {
+            /* fall through */
+        }
+    }
+    return String(err);
+}
+
 const ARI_URL = process.env.ARI_URL || 'http://127.0.0.1:8088';
 const ARI_USERNAME = process.env.ARI_USERNAME;
 const ARI_PASSWORD = process.env.ARI_PASSWORD;
@@ -76,6 +95,17 @@ const GHOST_AGENT_POLL_MS = 30000;
 const GHOST_FLAP_WINDOW_MS = 60 * 60 * 1000;
 const GHOST_FLAP_THRESHOLD = 3;
 const ghostReconcileTimestamps = new Map();
+// A ring failure ("Allocation failed" from PJSIP — no active registration to
+// route to) most often means this agent's SIP session has already died even
+// though their heartbeat/DB status hasn't caught up yet (reconcileGhostAgents
+// runs periodically, not instantly). Observed live: the same customer
+// getting re-matched to the same dead agent on every 3s poll tick, over and
+// over, because the original catch here unconditionally reset them back to
+// 'available' after every failure. Two consecutive failures for the same
+// agent now flips them offline immediately instead of retrying them forever
+// — their own softphone reconnecting brings them back the normal way.
+const RING_FAILURE_THRESHOLD = 2;
+const ringFailureCounts = new Map(); // agentId -> consecutive origination-failure count
 const HOLDING_BRIDGE_NAME = 'support-queue';
 // AT's trunk rules explicitly prohibit masking outbound caller ID — every
 // agent-placed call must present the same assigned Voice number, regardless
@@ -424,10 +454,21 @@ async function dequeueNext() {
                     timeout: 25
                 });
                 ringGroup.push({ channel: agentChannel, agentId: agent.id });
+                ringFailureCounts.delete(agent.id);
             } catch (err) {
                 agentLegBySessionId.delete(channelId);
-                console.error(`❌ Failed to ring agent ${agent.id}:`, err.message);
-                await setAgentStatus(agent.id, 'available');
+                console.error(`❌ Failed to ring agent ${agent.id}:`, errText(err));
+                const failures = (ringFailureCounts.get(agent.id) || 0) + 1;
+                if (failures >= RING_FAILURE_THRESHOLD) {
+                    console.warn(
+                        `⚠️ Agent ${agent.id} failed to ring ${failures} times in a row — flipping offline instead of retrying again next tick`
+                    );
+                    ringFailureCounts.delete(agent.id);
+                    await setAgentStatus(agent.id, 'offline');
+                } else {
+                    ringFailureCounts.set(agent.id, failures);
+                    await setAgentStatus(agent.id, 'available');
+                }
             }
         })
     );
@@ -1089,7 +1130,7 @@ async function main() {
 
             await runIvrMenu(channel, sessionId);
         } catch (err) {
-            console.error(`❌ Error handling call ${sessionId}:`, err.message);
+            console.error(`❌ Error handling call ${sessionId}:`, errText(err));
             await channel.hangup().catch(() => {});
         }
     });
